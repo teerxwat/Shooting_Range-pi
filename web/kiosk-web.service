@@ -1,0 +1,28 @@
+# ============================================================
+# systemd unit — เสิร์ฟหน้าเว็บ kiosk (web/dist/kiosk) ที่พอร์ต 5173
+# ให้รันอัตโนมัติทุกครั้งที่ Pi บูต (คู่กับ gopro-kiosk.service ที่เสิร์ฟ API พอร์ต 8000)
+#
+# วิธีติดตั้ง:
+#   sudo cp kiosk-web.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now kiosk-web
+#   ดู log:  journalctl -u kiosk-web -f
+#
+# หมายเหตุ: ถ้าแก้โค้ด web/src/kiosk แล้วต้อง build ใหม่ก่อน service จะเห็นการเปลี่ยนแปลง
+#   cd web && npm run build:kiosk && sudo systemctl restart kiosk-web
+# ============================================================
+[Unit]
+Description=Shooting Range - Kiosk web UI (serve dist/kiosk :5173)
+After=network-online.target gopro-kiosk.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/Desktop/Shooting_Range/v2/web
+ExecStart=/home/pi/Desktop/Shooting_Range/v2/web/node_modules/.bin/serve -s dist/kiosk -l 5173
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

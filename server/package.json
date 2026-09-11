@@ -1,0 +1,21 @@
+{
+  "name": "shooting-range-server",
+  "private": true,
+  "version": "2.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "start": "node src/index.js",
+    "seed": "node seed.js",
+    "selftest": "node selftest.js",
+    "reset": "rm -rf data && echo ล้างไฟล์วิดีโอแล้ว (ข้อมูลใน MySQL ยังอยู่)"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "multer": "^2.0.1",
+    "mysql2": "^3.11.0",
+    "qrcode": "^1.5.4"
+  }
+}

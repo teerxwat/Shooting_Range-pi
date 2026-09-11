@@ -1,0 +1,25 @@
+{
+  "name": "shooting-range-web",
+  "private": true,
+  "version": "2.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:customer": "vite --mode customer",
+    "dev:all": "npm run dev & npm run dev:customer",
+    "build": "npm run build:kiosk && npm run build:customer",
+    "build:kiosk": "vite build --outDir dist/kiosk",
+    "build:customer": "vite build --outDir dist/customer --mode customer",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.26.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.1",
+    "serve": "^14.2.6",
+    "vite": "^5.4.0"
+  }
+}

@@ -1,0 +1,160 @@
+{
+  "info": {
+    "name": "Shooting Range — Payment API (LianLian)",
+    "description": "ทดสอบ payment API (LianLian) ผ่าน https://shot24.shop\n\nวิธีใช้\n1. ใส่ api_key ในแท็บ Variables ของ collection\n2. รันคำขอที่ 2 → เปิดแท็บ Visualize ในช่องผลลัพธ์ จะเห็น QR\n3. สแกนจ่ายด้วยแอปธนาคาร\n4. รันคำขอที่ 3 ดูว่าสถานะเปลี่ยนเป็น paid ไหม\n\ncollection เก็บ merchant_order_id ให้อัตโนมัติ ไม่ต้อง copy เอง\n\n⚠️ ตอนนี้ต่อ production แล้ว = เงินออกจากบัญชีจริง ใส่ยอดน้อยๆ ตอนทดสอบ",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "https://shot24.shop",
+      "description": "ผ่าน Caddy (route @paygw) · หรือ http://localhost:9999 ถ้าเจาะอุโมงค์ SSH"
+    },
+    {
+      "key": "api_key",
+      "value": "",
+      "description": "X-API-Key ของ payment API (ดูใน Caddyfile หรือ .env ของ paygw)"
+    },
+    { "key": "amount", "value": "1.00", "description": "ยอดทดสอบ — production key = เงินจริง อย่าใส่เยอะ" },
+    { "key": "merchant_order_id", "value": "", "description": "ระบบเติมให้เองจากคำขอที่ 2" }
+  ],
+  "item": [
+    {
+      "name": "1. Health — เช็คว่า service ทำงาน",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": { "raw": "{{base_url}}/health", "host": ["{{base_url}}"], "path": ["health"] }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('service ตอบสนอง', () => pm.response.to.have.status(200));",
+              "console.log(pm.response.text());"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Create QR — สร้างรายการจ่ายเงิน",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-API-Key", "value": "{{api_key}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"channel\": \"thai_qr\",\n  \"amount\": \"{{amount}}\",\n  \"order_desc\": \"Shooting Range API test\",\n  \"merchant_order_id\": \"TEST-{{$timestamp}}\",\n  \"expire_seconds\": 600\n}"
+        },
+        "url": { "raw": "{{base_url}}/transfer", "host": ["{{base_url}}"], "path": ["transfer"] }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const r = pm.response.json();",
+              "console.log('── response ──');",
+              "console.log(JSON.stringify(r, null, 2));",
+              "",
+              "// เก็บเลขอ้างอิงไว้ให้คำขอที่ 3 ใช้ต่อ",
+              "const d = r.data || r;",
+              "const id = d.merchant_order_id || d.merchantOrderId || d.order_id;",
+              "if (id) {",
+              "  pm.collectionVariables.set('merchant_order_id', id);",
+              "  console.log('merchant_order_id =', id);",
+              "}",
+              "",
+              "// ── แสดง QR ในแท็บ Visualize ของ Postman ──",
+              "const img = d.qr_image_base64 || d.qr_image || d.qrcode_img || d.qr_img;",
+              "const payload = d.qr_content || d.qr_code || d.qrcode || d.qr_string;",
+              "",
+              "let uri = '';",
+              "if (img) uri = img.startsWith('data:') ? img : 'data:image/png;base64,' + img;",
+              "",
+              "const tpl = `",
+              "<div style=\"font-family:sans-serif;text-align:center;padding:18px\">",
+              "  <div style=\"font-size:15px;color:#555;margin-bottom:4px\">สแกนเพื่อจ่าย</div>",
+              "  <div style=\"font-size:26px;font-weight:700;margin-bottom:14px\">{{amount}} บาท</div>",
+              "  {{#if uri}}<img src=\"{{uri}}\" style=\"width:260px;height:260px;border:1px solid #ddd;border-radius:12px\">{{/if}}",
+              "  {{#unless uri}}<div style=\"color:#b00\">ไม่พบรูป QR ใน response — ดู payload ด้านล่าง</div>{{/unless}}",
+              "  <div style=\"font-family:monospace;font-size:11px;color:#888;margin-top:14px;word-break:break-all\">{{ref}}</div>",
+              "  {{#if payload}}<div style=\"font-family:monospace;font-size:10px;color:#aaa;margin-top:8px;word-break:break-all\">{{payload}}</div>{{/if}}",
+              "</div>`;",
+              "",
+              "pm.visualizer.set(tpl, {",
+              "  uri, payload,",
+              "  amount: pm.collectionVariables.get('amount'),",
+              "  ref: id || '(ไม่พบเลขอ้างอิง)'",
+              "});",
+              "",
+              "if (payload) console.log('QR payload:', payload);",
+              "if (uri) console.log('เปิดแท็บ Visualize เพื่อดู QR (หรือ copy data URI นี้ไปวางในเบราว์เซอร์)');",
+              "",
+              "pm.test('สร้างรายการสำเร็จ', () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Check status — เช็คว่าจ่ายแล้วหรือยัง",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "X-API-Key", "value": "{{api_key}}" }],
+        "url": {
+          "raw": "{{base_url}}/transfer/{{merchant_order_id}}",
+          "host": ["{{base_url}}"],
+          "path": ["transfer", "{{merchant_order_id}}"]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const r = pm.response.json();",
+              "console.log(JSON.stringify(r, null, 2));",
+              "const d = r.data || r;",
+              "console.log('สถานะ:', d.status || d.trade_status || '(ไม่พบ field status)');"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Webhook — เช็คว่าเส้นทางเปิดจากข้างนอกได้",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "https://shot24.shop/webhook/lianlian",
+          "protocol": "https",
+          "host": ["shot24", "shop"],
+          "path": ["webhook", "lianlian"]
+        },
+        "description": "ได้ 405 หรือ 400 = ดี (เส้นทางถึง แค่ method ไม่ตรง)\nได้ 404 = Caddy ยังไม่มี route นี้ LianLian จะแจ้งผลกลับมาไม่ได้"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const ok = [400, 401, 405, 422].includes(pm.response.code);",
+              "pm.test('เส้นทาง webhook เปิดอยู่ (ไม่ใช่ 404)', () => pm.expect(pm.response.code).to.not.eql(404));",
+              "console.log(ok ? 'route ถึงแล้ว ✅' : 'code = ' + pm.response.code);"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+requests>=2.31
+python-dotenv>=1.0
+
+# ── Web API (server.py) ──
+fastapi>=0.110
+uvicorn>=0.29
+qrcode[pil]>=7.4

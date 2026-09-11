@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ปลดล็อควิดีโอ — พนักงาน</title>
+<style>
+  :root { color-scheme: light dark; --bg:#f6f6f7; --card:#fff; --line:#e2e2e6; --muted:#6b6b73; --accent:#c8102e; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#131316; --card:#1c1c20; --line:#2e2e34; --muted:#9a9aa3; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:18px; background:var(--bg); font-family:-apple-system,"Segoe UI","Noto Sans Thai",sans-serif; }
+  .wrap { max-width:640px; margin:0 auto; }
+  h1 { font-size:19px; margin:0 0 4px; }
+  .sub { color:var(--muted); font-size:13.5px; margin-bottom:16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px 16px; margin-bottom:10px; }
+  .row { display:flex; justify-content:space-between; align-items:center; gap:12px; }
+  .big { font-size:16px; font-weight:700; }
+  .meta { color:var(--muted); font-size:12.5px; margin-top:3px; font-family:ui-monospace,monospace; }
+  input, button { font-family:inherit; font-size:15px; }
+  input { width:100%; padding:12px; border:1px solid var(--line); border-radius:10px; background:var(--bg); color:inherit; }
+  button { padding:11px 16px; border:none; border-radius:10px; background:var(--accent); color:#fff; font-weight:600; cursor:pointer; }
+  button.ghost { background:transparent; border:1px solid var(--line); color:var(--muted); font-weight:400; }
+  button:disabled { opacity:.5; cursor:default; }
+  .note { width:100%; margin-top:10px; }
+  .empty { text-align:center; color:var(--muted); padding:30px 0; font-size:14px; }
+  .ok { color:#1a7f37; font-size:13px; margin-top:8px; }
+  .err { color:var(--accent); font-size:13px; margin-top:8px; }
+  .bar { display:flex; gap:8px; margin-bottom:14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>ปลดล็อควิดีโอด้วยตัวเอง</h1>
+  <div class="sub">
+    ใช้เมื่อลูกค้าจ่ายเงินแล้วแต่ระบบยังไม่ขึ้น — <b>ขอดูสลิปจากลูกค้าก่อนทุกครั้ง</b>
+    ตรวจยอดและเวลาให้ตรง แล้วจึงกดปลดล็อค ทุกครั้งที่กดจะถูกบันทึกไว้
+  </div>
+
+  <div id="login">
+    <div class="card">
+      <div style="margin-bottom:10px; font-weight:600;">รหัสพนักงาน (Admin Key)</div>
+      <input id="key" type="password" autocomplete="current-password" placeholder="วางรหัสที่นี่" />
+      <button style="margin-top:10px; width:100%;" onclick="login()">เข้าใช้งาน</button>
+      <div id="loginMsg" class="err"></div>
+    </div>
+  </div>
+
+  <div id="main" hidden>
+    <div class="bar">
+      <button class="ghost" style="flex:1" onclick="load()">รีเฟรช</button>
+      <button class="ghost" style="flex:1" onclick="logout()">ออกจากระบบ</button>
+    </div>
+    <div id="list"></div>
+  </div>
+</div>
+
+<script>
+/*
+ * หน้านี้ไม่มี build step — แก้แล้วรีสตาร์ทเซิร์ฟเวอร์ก็ใช้ได้เลย
+ * เก็บ admin key ไว้ใน sessionStorage เท่านั้น ปิดแท็บแล้วหาย
+ */
+const KEY = 'sr.adminKey';
+const key = () => sessionStorage.getItem(KEY) || '';
+
+async function api(path, options = {}) {
+  const r = await fetch('/api/admin' + path, {
+    ...options,
+    headers: { 'X-Admin-Key': key(), 'Content-Type': 'application/json', ...(options.headers || {}) },
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || 'เกิดข้อผิดพลาด (' + r.status + ')');
+  return j;
+}
+
+async function login() {
+  const v = document.getElementById('key').value.trim();
+  if (!v) return;
+  sessionStorage.setItem(KEY, v);
+  try {
+    await api('/pending-orders');
+    document.getElementById('login').hidden = true;
+    document.getElementById('main').hidden = false;
+    load();
+  } catch (e) {
+    sessionStorage.removeItem(KEY);
+    document.getElementById('loginMsg').textContent = e.message;
+  }
+}
+
+function logout() {
+  sessionStorage.removeItem(KEY);
+  location.reload();
+}
+
+const fmt = (ms) => new Date(ms).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' });
+
+async function load() {
+  const box = document.getElementById('list');
+  box.innerHTML = '<div class="empty">กำลังโหลด…</div>';
+  try {
+    const d = await api('/pending-orders');
+    if (!d.count) { box.innerHTML = '<div class="empty">ไม่มีออเดอร์ค้างจ่าย</div>'; return; }
+    box.innerHTML = d.orders.map((o) => `
+      <div class="card" id="o${o.order_id}">
+        <div class="row">
+          <div>
+            <div class="big">เซสชัน ${o.session} · ช่อง ${o.lane} · คลิปที่ ${o.clip}</div>
+            <div class="meta">#${o.order_id} · ${o.amount} บาท · ${o.filter} · x${o.speed} · ${fmt(o.created_at)}</div>
+          </div>
+          <button onclick="approve(${o.order_id})">ปลดล็อค</button>
+        </div>
+        <input class="note" placeholder="เลขอ้างอิงในสลิป / ชื่อผู้อนุมัติ" />
+        <div class="msg"></div>
+      </div>`).join('');
+  } catch (e) {
+    box.innerHTML = '<div class="err">' + e.message + '</div>';
+  }
+}
+
+async function approve(id) {
+  const card = document.getElementById('o' + id);
+  const note = card.querySelector('.note').value.trim();
+  if (!note) { card.querySelector('.msg').className = 'err msg';
+               card.querySelector('.msg').textContent = 'กรอกเลขอ้างอิงในสลิปและชื่อผู้อนุมัติก่อน'; return; }
+  if (!confirm('ตรวจสลิปแล้วใช่ไหม? กดตกลงเพื่อปลดล็อควิดีโอให้ลูกค้า')) return;
+
+  const btn = card.querySelector('button');
+  btn.disabled = true; btn.textContent = 'กำลังปลดล็อค…';
+  try {
+    await api('/orders/' + id + '/approve', { method: 'POST', body: JSON.stringify({ note }) });
+    card.querySelector('.msg').className = 'ok msg';
+    card.querySelector('.msg').textContent = 'ปลดล็อคแล้ว — ระบบกำลังเตรียมไฟล์ให้ลูกค้า';
+    btn.textContent = 'เรียบร้อย';
+    setTimeout(load, 2500);
+  } catch (e) {
+    card.querySelector('.msg').className = 'err msg';
+    card.querySelector('.msg').textContent = e.message;
+    btn.disabled = false; btn.textContent = 'ปลดล็อค';
+  }
+}
+
+if (key()) login();
+</script>
+</body>
+</html>

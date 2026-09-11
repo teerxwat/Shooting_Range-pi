@@ -1,0 +1,96 @@
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  background: #f2f1ee;
+}
+
+a {
+  color: var(--accent, #4d6780);
+}
+a:hover {
+  color: #3a5268;
+}
+
+button {
+  font-family: inherit;
+}
+
+input[type='range'] {
+  accent-color: var(--accent, #4d6780);
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* hover interactions (prototype: style-hover) */
+.lane-card {
+  transition: transform 0.12s, box-shadow 0.12s;
+}
+.lane-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 10px 28px rgba(20, 20, 20, 0.1);
+  border-color: var(--accent, #4d6780) !important;
+}
+
+.clip-card {
+  transition: transform 0.12s;
+}
+.clip-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent, #4d6780) !important;
+}
+
+/* ── มือถือ ─────────────────────────────────────────── */
+
+/* ซ่อนของประดับบนจอแคบ (นาฬิกา, คำบรรยายใต้โลโก้) */
+@media (max-width: 560px) {
+  .hide-sm {
+    display: none !important;
+  }
+}
+
+/* ไม่ให้ iOS ซูมเข้าเองตอนโฟกัสช่องกรอก (ต้อง ≥16px) */
+input,
+select,
+textarea {
+  font-size: max(16px, 1em);
+}
+
+/* ตัดเงาฟ้าตอนแตะปุ่มบน iOS/Android */
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ปุ่มยุบเล็กน้อยตอนกด — ให้ความรู้สึกว่ากดติด */
+button:not(:disabled):active {
+  transform: scale(0.96);
+}
+
+button:disabled {
+  opacity: 0.45;
+}
+
+/* กันหน้าเลื่อนซ้ายขวาจากของที่ล้นขอบ */
+body {
+  overflow-x: hidden;
+}

@@ -1,0 +1,33 @@
+# ============================================================
+# Dependencies สำหรับรันบน Raspberry Pi (ARM64 / Raspberry Pi OS Bookworm 64-bit)
+# ต่างจาก requirements.txt เดิมตรงที่รวม dependency ของ YOLO/กล้องครบ
+# และใช้ opencv แบบ headless (ไม่ต้องมีจอ) ให้เหมาะกับ Pi ที่รันแบบ headless
+#
+# ติดตั้ง:  pip install -r requirements-pi.txt
+# แนะนำให้รันผ่าน setup-pi.sh ซึ่งจะสร้าง venv + ลง apt package ที่จำเป็นให้ก่อน
+# ============================================================
+
+# ── Web API (server.py) ──
+fastapi>=0.110
+uvicorn>=0.29
+pydantic>=2.0
+qrcode[pil]>=7.4
+
+# ── HTTP / config ──
+requests>=2.31
+python-dotenv>=1.0
+
+# ── GoPro control ผ่าน Bluetooth (BLE) + WiFi ──
+# บน Linux ใช้ BlueZ เป็น backend (ลง bluez ผ่าน apt ใน setup-pi.sh)
+open-gopro>=0.18
+
+# ── YOLO pose detection ──
+# ultralytics จะดึง torch / torchvision / numpy มาให้อัตโนมัติ
+# บน Pi (ARM64) จะได้ torch เวอร์ชัน CPU (ไม่มี CUDA) — ทำงานได้แต่ FPS ต่ำกว่า Mac
+ultralytics>=8.2
+
+# opencv แบบ headless — ไม่ลาก GUI libs (Qt/GTK) มาให้หนักเครื่อง Pi
+# ถ้าต้องการเปิดหน้าต่าง cv2 บน Pi ที่มีจอ ให้เปลี่ยนเป็น opencv-python แทน
+opencv-python-headless>=4.9
+
+numpy>=1.24

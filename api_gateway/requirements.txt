@@ -1,0 +1,9 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+requests>=2.31
+cryptography>=42.0
+python-dotenv>=1.0
+pydantic>=2.6
+SQLAlchemy>=2.0
+PyMySQL>=1.1                # MySQL / MariaDB (phpMyAdmin)
+# psycopg2-binary>=2.9      # uncomment ถ้าใช้ PostgreSQL แทน

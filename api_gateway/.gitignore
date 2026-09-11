@@ -1,0 +1,16 @@
+# Secrets — NEVER commit these
+.env
+*.pem
+*.key
+
+# Local database + generated QR artifacts
+*.db
+qr_*.png
+qr_*.b64.txt
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/

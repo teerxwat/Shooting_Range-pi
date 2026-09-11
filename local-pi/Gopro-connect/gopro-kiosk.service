@@ -1,0 +1,26 @@
+# ============================================================
+# systemd unit (ทางเลือก) — ให้ server.py รันอัตโนมัติทุกครั้งที่ Pi บูต
+#
+# วิธีติดตั้ง:
+#   1) แก้ User= และ path ให้ตรงกับเครื่อง (ดู path ด้วย: pwd)
+#   2) sudo cp gopro-kiosk.service /etc/systemd/system/
+#   3) sudo systemctl daemon-reload
+#   4) sudo systemctl enable --now gopro-kiosk
+#   ดู log:  journalctl -u gopro-kiosk -f
+# ============================================================
+[Unit]
+Description=Shooting Range - GoPro/YOLO camera backend (server.py)
+After=network-online.target bluetooth.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/Desktop/Shooting_Range/v2/local-pi/Gopro-connect
+ExecStart=/home/pi/Desktop/Shooting_Range/v2/local-pi/Gopro-connect/run-pi.sh
+Restart=on-failure
+RestartSec=5
+Environment=QT_QPA_PLATFORM=offscreen
+
+[Install]
+WantedBy=multi-user.target
