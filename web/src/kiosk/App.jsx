@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { useApp } from '@/shared/AppContext';
 import Header from '@/shared/components/Header';
@@ -9,6 +10,23 @@ import Playback from './pages/Playback';
 /** แอปหน้าจอที่สนามยิงปืน — คุยกับ server.py ใน LAN (ทำงานได้แม้เน็ตล่ม) */
 export default function KioskApp() {
   const { themeVars } = useApp();
+
+  // กัน scrollbar ที่ระดับหน้าเบราว์เซอร์เด็ดขาด — ตัว div ข้างล่างกะขนาดให้พอดี
+  // จออยู่แล้ว (100dvh + overflow hidden) แต่ถ้ามีปัดเศษพลาดไปสัก 1px (ฟอนต์โหลดช้า,
+  // ความต่างเล็กน้อยระหว่าง browser) จะได้ไม่โผล่เป็น scrollbar ให้เห็นที่ html/body เอง
+  // ทำเฉพาะฝั่ง kiosk เท่านั้น (ไม่กระทบหน้าเว็บลูกค้าที่ต้อง scroll ยาวได้ปกติ)
+  useEffect(() => {
+    const { style: htmlStyle } = document.documentElement;
+    const { style: bodyStyle } = document.body;
+    const prevHtml = htmlStyle.overflow;
+    const prevBody = bodyStyle.overflow;
+    htmlStyle.overflow = 'hidden';
+    bodyStyle.overflow = 'hidden';
+    return () => {
+      htmlStyle.overflow = prevHtml;
+      bodyStyle.overflow = prevBody;
+    };
+  }, []);
 
   return (
     <div
