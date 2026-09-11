@@ -21,7 +21,7 @@ export default function LaneSelect() {
     <Main>
       <section
         style={{
-          minHeight: 'calc(100vh - 130px)',
+          minHeight: 'calc(100dvh - 130px)',
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',

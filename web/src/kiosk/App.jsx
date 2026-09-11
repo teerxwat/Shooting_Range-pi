@@ -14,7 +14,10 @@ export default function KioskApp() {
     <div
       style={{
         ...themeVars,
-        height: '100vh',
+        // dvh แทน vh — กัน scrollbar เกินโดยไม่มีอะไรให้เลื่อนตอนเปิดผ่านเบราว์เซอร์ปกติ
+        // (มีแถบ URL/toolbar กินพื้นที่) ไม่ใช่ Chromium --kiosk เต็มจอแบบเดิม ซึ่ง vh กับพื้นที่จริง
+        // ไม่เท่ากันพอดีอีกต่อไป — dvh คำนวณจากพื้นที่ที่เห็นจริงเสมอ
+        height: '100dvh',
         overflow: 'hidden',
         background: 'var(--bg)',
         color: 'var(--text)',
