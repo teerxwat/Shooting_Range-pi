@@ -18,6 +18,12 @@ def _as_bool(value, default=False):
 UDP_LISTEN_PORT  = int(os.getenv("UDP_LISTEN_PORT",  "12344"))  # รับจาก ESP32
 UDP_DISPLAY_PORT = int(os.getenv("UDP_DISPLAY_PORT", "12345"))  # ส่งไป ESP32
 
+# ----- lane / station id -----
+# ระบุว่า Pi เครื่องนี้อยู่ "เลนไหน" — ใช้เป็นเลขนำหน้า session code (เช่น LANE_ID=2 → S2-0001, S2-0002, ...)
+# ต้องตั้งไม่ซ้ำกันทุกเครื่องที่อัปโหลดขึ้นคลาวด์เดียวกัน (shot24.shop) ไม่งั้น session code จะชนกัน
+# (ต่างจาก NUM_CHANNELS/ch ด้านล่าง ซึ่งเป็นเลขช่องกล้อง*ภายใน*เครื่องเดียว ไม่ใช่เลขเลนจริง)
+LANE_ID = os.getenv("LANE_ID", "1").strip() or "1"
+
 # ----- global settings -----
 PORT = int(os.getenv("PORT", "8080"))
 PRESET_ID = int(os.getenv("PRESET_ID", "262144"))

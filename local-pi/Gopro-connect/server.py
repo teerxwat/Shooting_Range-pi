@@ -76,7 +76,10 @@ VIDEO_EXTS = (".mp4", ".360", ".mov")
 
 
 def next_session_code(ch: int) -> str:
-    """คืนรหัสเซสชันไม่ซ้ำ เช่น S1-0001, S1-0002 (นับต่อจากเดิมเสมอ)"""
+    """คืนรหัสเซสชันไม่ซ้ำ เช่น S1-0001, S1-0002 (นับต่อจากเดิมเสมอ)
+    เลขนำหน้า = config.LANE_ID (ตั้งใน .env) ไม่ใช่ ch — กัน code ชนกันตอนมีหลาย Pi
+    อัปคลิปขึ้นคลาวด์เดียวกัน (แต่ละ Pi นับ ch1 เป็นเลนของตัวเองเหมือนกันหมด ถ้าใช้ ch
+    ตรงๆ เป็นเลขนำหน้า ทุกเครื่องจะได้ S1-0001 ซ้ำกัน แล้วชนกันบน uq_code ฝั่งคลาวด์)"""
     with _counter_lock:
         os.makedirs(os.path.dirname(COUNTER_FILE), exist_ok=True)
         data = {}
@@ -90,7 +93,7 @@ def next_session_code(ch: int) -> str:
         data[str(ch)] = n
         with open(COUNTER_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f)
-        return f"S{ch}-{n:04d}"
+        return f"S{config.LANE_ID}-{n:04d}"
 
 
 def clips_dir(ch: int) -> str:
@@ -590,7 +593,12 @@ class LaneManager:
             return {"ok": True, "code": v["code"], "existing": True}
         v["pin"] = pin
         # ลงทะเบียนกับคลาวด์ทันที ถ้าเน็ตล่มไม่เป็นไร ตอนอัปคลิปจะลองใหม่ให้
-        uploader.register_session(v["code"], pin, ch)
+        # lane ที่ส่งขึ้นคลาวด์ = LANE_ID จริงของเครื่องนี้ (ไม่ใช่ ch ภายใน) ให้ตรงกับเลขใน code
+        try:
+            lane_num = int(config.LANE_ID)
+        except ValueError:
+            lane_num = ch
+        uploader.register_session(v["code"], pin, lane_num)
         print(f"  [ch{ch}] ตั้ง PIN ให้เซสชัน {v['code']} แล้ว")
         return {"ok": True, "code": v["code"], "existing": False}
 
