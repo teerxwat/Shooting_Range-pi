@@ -30,6 +30,9 @@ PRESET_ID = int(os.getenv("PRESET_ID", "262144"))
 RECORD_SECONDS = int(os.getenv("RECORD_SECONDS", "10"))
 DOWNLOAD_ROOT = os.getenv("DOWNLOAD_ROOT", "downloads")
 DOWNLOAD_WAIT = int(os.getenv("DOWNLOAD_WAIT", "30"))   # รอ finalize สูงสุด 30s
+# ไฟล์ใต้ DOWNLOAD_ROOT ที่เก่ากว่านี้ (วัน) จะถูกลบโดย cleanup_downloads.py (รันผ่าน cron ทุกวัน)
+# ไม่กระทบไฟล์บนคลาวด์ (shot24.shop) — คุมอายุแยกกันด้วย RETENTION_DAYS ฝั่ง server เอง
+DOWNLOAD_RETENTION_DAYS = int(os.getenv("DOWNLOAD_RETENTION_DAYS", "7"))
 NUM_CHANNELS = int(os.getenv("NUM_CHANNELS", "4"))
 CAMS_PER_CHANNEL = int(os.getenv("CAMS_PER_CHANNEL", "2"))
 
