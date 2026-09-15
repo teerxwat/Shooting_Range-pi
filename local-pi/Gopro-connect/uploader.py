@@ -30,6 +30,7 @@ API_KEY = os.getenv("CLOUD_API_KEY", "")
 ENABLED = os.getenv("CLOUD_UPLOAD", "1").lower() in ("1", "true", "yes")
 DELETE_AFTER_UPLOAD = os.getenv("DELETE_AFTER_UPLOAD", "1").lower() in ("1", "true", "yes")
 TIMEOUT = int(os.getenv("CLOUD_TIMEOUT", "180"))
+RETRY_MAX_WAIT = 60   # วินาที — เว้นช่วงลองอัปใหม่นานสุดตอนเน็ตหลุด
 QUEUE_FILE = os.path.join(os.path.dirname(__file__), ".session", "upload_queue.json")
 
 _q: "queue.Queue[dict]" = queue.Queue()
@@ -37,6 +38,13 @@ _pending: list[dict] = []          # สำเนาไว้บันทึก�
 _registered: set[str] = set()      # เซสชันที่ลงทะเบียนกับคลาวด์แล้ว (กันยิงซ้ำทุกคลิป)
 _lock = threading.Lock()
 _started = False
+_on_uploaded = None                # callback(job) หลังอัปสำเร็จ — server.py ใช้ลบไฟล์ในเครื่อง
+
+
+def set_on_uploaded(callback):
+    """ลงทะเบียน callback(job) ที่ถูกเรียกหลังคลิปอัปขึ้นคลาวด์สำเร็จแล้วเท่านั้น"""
+    global _on_uploaded
+    _on_uploaded = callback
 
 
 def enabled() -> bool:
@@ -159,6 +167,11 @@ def _upload_one(job: dict) -> bool:
             mb = os.path.getsize(path) / 1024 ** 2
             print(f"  [upload] ✅ {job['code']}-{job['sub_no']} ({mb:.1f} MB)")
             _delete_from_gopro(job)
+            if _on_uploaded:
+                try:
+                    _on_uploaded(job)
+                except Exception as e:
+                    print(f"  [upload] จัดการไฟล์ในเครื่องหลังอัปไม่สำเร็จ: {e}")
             return True
         # 404 = ไม่มีเซสชันนี้บนคลาวด์ / 400 = ไฟล์เสีย → ลองใหม่ก็ไม่ช่วย
         if r.status_code in (400, 404):
@@ -196,8 +209,9 @@ def _worker():
         while not _upload_one(job):
             job["tries"] += 1
             _save_queue()
-            # หน่วงเพิ่มขึ้นเรื่อยๆ สูงสุด 5 นาที (เน็ตล่มยาวก็ไม่ถล่มเซิร์ฟเวอร์)
-            wait = min(10 * 2 ** min(job["tries"], 5), 300)
+            # หน่วงเพิ่มขึ้นเรื่อยๆ (20 → 40 → 60 วิ) สูงสุด RETRY_MAX_WAIT
+            # ไม่ให้นานกว่านี้ — เน็ตกลับมาแล้วคิวต้องเริ่มส่งย้อนหลังภายในไม่เกิน 1 นาที
+            wait = min(10 * 2 ** min(job["tries"], 3), RETRY_MAX_WAIT)
             print(f"  [upload] รอ {wait} วิ แล้วลองใหม่ (ครั้งที่ {job['tries']})")
             time.sleep(wait)
         _done(job)

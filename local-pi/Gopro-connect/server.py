@@ -200,6 +200,18 @@ def transcode_file(src: str, out: str, on_progress=None, log=print) -> bool:
     return True
 
 
+def _prune_empty_dirs(path: str, stop: str):
+    """ลบโฟลเดอร์ว่างไล่ขึ้นไปทีละชั้น จนเจอโฟลเดอร์ที่มีของ หรือถึง stop (ไม่ลบ stop เอง)"""
+    stop = os.path.abspath(stop)
+    path = os.path.abspath(path)
+    while path.startswith(stop + os.sep) and path != stop:
+        try:
+            os.rmdir(path)          # ลบได้เฉพาะโฟลเดอร์ว่าง
+        except OSError:
+            return
+        path = os.path.dirname(path)
+
+
 # ═══ ClipProcessor: แปลงไฟล์ + อัปขึ้นคลาวด์เบื้องหลัง ═════════════════════════════
 # รอบอัดจบทันทีหลังดาวน์โหลดจากกล้อง → ลูกค้ากลับไปดูภาพสด/อัดรอบใหม่ได้เลย ไม่ต้องเห็นหน้าจอโหลด
 # หน้าเว็บแสดงแถบ % เล็กๆ จาก processing_for() แทน
@@ -236,6 +248,8 @@ class ClipProcessor:
             }
             if os.path.abspath(src) != os.path.abspath(job["src"]):
                 shutil.move(src, job["src"])
+                # โฟลเดอร์ดาวน์โหลดชั่วคราว downloads/<stamp>/channel-N/<cam>/ ว่างแล้ว → ลบทิ้ง
+                _prune_empty_dirs(os.path.dirname(src), config.DOWNLOAD_ROOT)
             self._jobs.append(job)
         self._q.put(job)
         log(f"ส่งคลิป {base_name} เข้าคิวแปลงไฟล์เบื้องหลัง (รอคิว {waiting} งาน)")
@@ -296,9 +310,15 @@ class ClipProcessor:
         # ย้ายไฟล์ + เอางานออกจากคิวใน lock เดียวกัน → นับเลขคลิปถัดไปไม่ซ้ำ/ไม่ข้าม
         with self._lock:
             if ok:
-                orig_dir = os.path.join(os.path.dirname(final), "originals")
-                os.makedirs(orig_dir, exist_ok=True)
-                shutil.move(src, os.path.join(orig_dir, os.path.basename(final)))
+                if DELETE_LOCAL_AFTER_UPLOAD:
+                    # ต้นฉบับ 4K ไม่ได้ใช้ต่อ (อัปขึ้นคลาวด์ด้วยไฟล์ที่แปลงแล้ว) → ลบเลย ไม่ต้องรออัป
+                    # ประหยัดที่ตอนเน็ตหลุด ~100 MB/คลิป — กล้องยังเก็บต้นฉบับไว้จนกว่าจะอัปสำเร็จ
+                    freed = _remove_file(src)
+                    log(f"ลบต้นฉบับ 4K ในเครื่องหลังแปลงเสร็จ ({freed / 1024 ** 2:.0f} MB)")
+                else:
+                    orig_dir = os.path.join(os.path.dirname(final), "originals")
+                    os.makedirs(orig_dir, exist_ok=True)
+                    shutil.move(src, os.path.join(orig_dir, os.path.basename(final)))
                 os.replace(tmp, final)       # คลิปโผล่ในรายการตอนนี้
             else:
                 shutil.move(src, final)      # แปลงไม่ได้ → ใช้ไฟล์จากกล้องตรงๆ (เหมือนเดิม)
@@ -314,6 +334,105 @@ class ClipProcessor:
             gopro_ip=g.get("ip", ""), gopro_port=g.get("port", 8080),
             gopro_directory=g.get("directory", ""), gopro_filename=g.get("filename", ""),
         )
+
+
+# ═══ LocalCleaner: ลบคลิปในเครื่อง Pi หลังอัปขึ้นคลาวด์สำเร็จ ══════════════════════════
+# กันพื้นที่ SD card เต็มในระยะยาว (DELETE_LOCAL_AFTER_UPLOAD=1, ค่าเริ่มต้น)
+#   - ต้นฉบับ 4K จากกล้อง (~100 MB/คลิป) → ลบทันทีหลังแปลงไฟล์เสร็จ ไม่ต้องรออัป (ดู ClipProcessor._process)
+#     กล้องยังเก็บต้นฉบับไว้จนอัปสำเร็จ · คลิปเก่าที่ยังมีใน originals/ → ลบตอนอัปสำเร็จ
+#   - ไฟล์ H.264 ที่จอใช้เล่นรีเพลย์ → ลบเมื่ออัปสำเร็จ "และ" เซสชันนั้นจบแล้ว
+#     (ลูกค้ายังดูรีเพลย์ที่เลนได้จนกดจบการใช้งาน/ออกจากเลน)
+# อัปไม่สำเร็จ = ไม่ลบ · รายการที่รอลบเก็บใน .session/uploaded_clips.json (รีสตาร์ทแล้วลบต่อได้)
+
+DELETE_LOCAL_AFTER_UPLOAD = (os.getenv("DELETE_LOCAL_AFTER_UPLOAD", "1").strip().lower()
+                             in ("1", "true", "yes", "on"))
+
+
+def _original_of(path: str) -> str:
+    return os.path.join(os.path.dirname(path), "originals", os.path.basename(path))
+
+
+def _remove_file(path: str) -> int:
+    """ลบไฟล์ถ้ามี — คืนขนาดที่ลบได้ (byte)"""
+    try:
+        size = os.path.getsize(path)
+        os.remove(path)
+        return size
+    except OSError:
+        return 0
+
+
+class LocalCleaner:
+    FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".session", "uploaded_clips.json")
+    SWEEP_EVERY = 60   # วินาที — เช็คว่าเซสชันของคลิปที่อัปแล้วจบหรือยัง
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._wake = threading.Event()
+        self._is_active = lambda ch, code: True    # ตั้งจริงตอน start() — ก่อนหน้านั้นไม่ลบอะไร
+        try:
+            with open(self.FILE, encoding="utf-8") as f:
+                self._items: list[dict] = json.load(f)
+        except (OSError, ValueError):
+            self._items = []
+
+    def start(self, is_active):
+        """is_active(ch, code) → True ถ้าเซสชันนี้ยังใช้งานอยู่ที่เลน (ยังต้องเก็บไฟล์ไว้เล่นรีเพลย์)"""
+        self._is_active = is_active
+        uploader.set_on_uploaded(self.on_uploaded)
+        threading.Thread(target=self._worker, daemon=True, name="local-cleaner").start()
+
+    def wake(self):
+        self._wake.set()
+
+    def _save(self):
+        os.makedirs(os.path.dirname(self.FILE), exist_ok=True)
+        tmp = self.FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(self._items, f, ensure_ascii=False)
+        os.replace(tmp, self.FILE)
+
+    def on_uploaded(self, job: dict):
+        """uploader เรียกหลังอัปสำเร็จ — ลบต้นฉบับทันที แล้วจดไฟล์เล่นรีเพลย์ไว้รอลบตอนเซสชันจบ"""
+        if not DELETE_LOCAL_AFTER_UPLOAD or not job.get("path"):
+            return
+        path = job["path"]
+        freed = _remove_file(_original_of(path))
+        if freed:
+            print(f"  [cleanup] ลบต้นฉบับในเครื่องแล้ว ({freed / 1024 ** 2:.0f} MB): {os.path.basename(path)}")
+        with self._lock:
+            if not any(i["path"] == path for i in self._items):
+                self._items.append({"path": path, "code": job.get("code"),
+                                    "ch": job.get("lane"), "uploaded_at": time.time()})
+                self._save()
+        self._wake.set()
+
+    def sweep(self):
+        with self._lock:
+            items = list(self._items)
+        done = []
+        for it in items:
+            if self._is_active(it["ch"], it["code"]):
+                continue
+            freed = _remove_file(it["path"]) + _remove_file(_original_of(it["path"]))
+            if freed:
+                print(f"  [cleanup] เซสชัน {it['code']} จบแล้ว → ลบคลิปในเครื่อง "
+                      f"({freed / 1024 ** 2:.0f} MB): {os.path.basename(it['path'])}")
+            done.append(it["path"])
+        if done:
+            with self._lock:
+                self._items = [i for i in self._items if i["path"] not in done]
+                self._save()
+
+    def _worker(self):
+        while True:
+            try:
+                if DELETE_LOCAL_AFTER_UPLOAD:
+                    self.sweep()
+            except Exception:
+                traceback.print_exc()
+            self._wake.wait(self.SWEEP_EVERY)
+            self._wake.clear()
 
 
 def scan_clips(ch: int, session_code: str | None = None) -> list[dict]:
@@ -774,6 +893,7 @@ class LaneManager:
             # ถูกเรียกอีกที status()["session"]["code"] จะยังโผล่รหัสเดิม แม้ sessionCode
             # (จาก visit) เป็น null แล้ว → ทำให้จอเว็บเห็นเหมือนเซสชันเดิมยังไม่จบ
             self.sessions.pop(ch, None)
+            cleaner.wake()   # เซสชันจบ → ลบคลิปที่อัปขึ้นคลาวด์แล้วของเซสชันนี้ออกจากเครื่อง
         if v is None and create:
             v = {"code": next_session_code(ch), "started": time.time(), "pin": None}
             self.visits[ch] = v
@@ -796,7 +916,10 @@ class LaneManager:
             lane_num = int(config.LANE_ID)
         except ValueError:
             lane_num = ch
-        uploader.register_session(v["code"], pin, lane_num)
+        # ลงทะเบียนเบื้องหลัง — เน็ตหลุดจะไม่ทำให้ลูกค้ากดยืนยัน PIN แล้วค้างรอ (timeout 20 วิ)
+        # ถ้าไม่สำเร็จ uploader จะลงทะเบียนให้อีกครั้งก่อนอัปคลิปแรกของเซสชันนี้
+        threading.Thread(target=uploader.register_session, args=(v["code"], pin, lane_num),
+                         daemon=True, name=f"register-{v['code']}").start()
         print(f"  [ch{ch}] ตั้ง PIN ให้เซสชัน {v['code']} แล้ว")
         return {"ok": True, "code": v["code"], "existing": False}
 
@@ -831,6 +954,7 @@ class LaneManager:
         if code:
             who = f"ผู้ดูแล: {staff['name']}" if staff else "ไม่ระบุผู้ดูแล"
             print(f"  [ch{ch}] จบเซสชัน {code} เอง (กดปุ่มจบการใช้งาน, {who})")
+            cleaner.wake()   # ลบคลิปที่อัปขึ้นคลาวด์แล้วของเซสชันนี้ออกจากเครื่อง
         return {
             "ok": True, "code": code, "action": action, "staff": staff,
             "report_id": report["report_id"] if report else None,
@@ -944,8 +1068,18 @@ class LaneManager:
 
 
 processor = ClipProcessor()
+cleaner = LocalCleaner()
 manager = LaneManager()
 processor.recover(manager.channels)
+
+
+def _session_active(ch, code) -> bool:
+    """เซสชันนี้ยังใช้งานอยู่ที่เลนไหม (ยังเป็นลูกค้าคนปัจจุบัน และยังอยู่หน้าช่อง)"""
+    v = manager.visits.get(ch)
+    return bool(v and v.get("code") == code and manager.is_occupied(ch))
+
+
+cleaner.start(_session_active)
 
 # ═══ FastAPI app ══════════════════════════════════════════════════════════════
 
