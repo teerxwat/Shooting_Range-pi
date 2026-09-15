@@ -75,6 +75,10 @@ WAKE_RETRIES         = 20
 WAKE_DELAY           = 1.5
 WAKE_TIMEOUT         = 2
 
+# preset ที่โหลดเมื่อกล้องแจ้งว่ายังส่ง preview ไม่ได้ (status 55 = 0)
+# อาการ: stream/start ตอบ 200 แต่ไม่มี UDP มาเลย — โหลด preset แล้วกล้องกลับมาส่งภาพ
+LIVE_PRESET_ID = _env_num("LIVE_PRESET_ID", 0)
+
 # ═══ ค่าจูนการตรวจจับท่ายิง — override ได้จาก .env (แก้แล้วรีสตาร์ท server) ═══
 STABLE_SECONDS   = _env_num("DETECT_STABLE_SECONDS", 3.0)    # ค้างท่ากี่วิถึง trigger
 COOLDOWN         = _env_num("DETECT_COOLDOWN", 5.0)
@@ -103,6 +107,10 @@ else:
     DEVICE = "cpu"
 
 _FALLBACK_DEVICE = "cpu"   # ใช้เมื่อ DEVICE หลักล้มเหลว
+
+# รันบน CPU (Pi): เว้น core ไว้ให้ ffmpeg decode ภาพ + web server ไม่งั้นภาพสดดีเลย์สะสม
+if DEVICE == "cpu":
+    torch.set_num_threads(max(1, _env_num("DETECT_TORCH_THREADS", (os.cpu_count() or 4) - 1)))
 
 FONT = cv2.FONT_HERSHEY_SIMPLEX
 
@@ -315,6 +323,32 @@ def _http_get(base: str, path: str, timeout=5, silent=False):
         return None
 
 
+def _http_json(base: str, path: str, timeout=3) -> dict:
+    """GET แล้วคืน JSON ({} ถ้าล้มเหลว)"""
+    ip = base.split("//")[-1].split(":")[0]
+    pw = _get_password(ip)
+    params = {"password": pw} if pw else None
+    try:
+        r = _detect_session.get(base + path, timeout=timeout, params=params)
+        return r.json() if r.status_code == 200 else {}
+    except (requests.exceptions.RequestException, ValueError):
+        return {}
+
+
+def _preview_available(base: str, tries=6) -> bool:
+    """
+    status 55 = กล้องพร้อมส่ง preview — คืน False เฉพาะตอนกล้องบอกชัดว่า 0
+    (อ่าน state ไม่ได้ / ไม่มี key → ไม่บล็อก ปล่อยให้ไปวัดจากเฟรมแรกแทน)
+    """
+    for i in range(tries):
+        status = _http_json(base, "/gopro/camera/state").get("status")
+        if not status or status.get("55", 1) != 0:
+            return True
+        if i < tries - 1:
+            time.sleep(0.5)
+    return False
+
+
 def _keep_alive(base: str, stop_event: threading.Event):
     while not stop_event.is_set():
         _http_get(base, "/gopro/camera/keep_alive", timeout=3, silent=True)
@@ -326,11 +360,13 @@ def _cam_awake(base: str) -> bool:
                      timeout=WAKE_TIMEOUT, silent=True) == 200
 
 
-def _wake_camera(base: str) -> bool:
+def _wake_camera(base: str, stop_event: Optional[threading.Event] = None) -> bool:
     if _cam_awake(base):
         return True
     print(f"  [Detect] ปลุกกล้อง {base}...")
     for i in range(1, WAKE_RETRIES + 1):
+        if stop_event is not None and stop_event.is_set():
+            return False
         _http_get(base, "/gopro/camera/keep_alive", timeout=WAKE_TIMEOUT, silent=True)
         _http_get(base, "/gopro/camera/control/wired_usb?p=1", timeout=WAKE_TIMEOUT, silent=True)
         if _cam_awake(base):
@@ -353,11 +389,11 @@ def _read_exact(stream, n):
 
 
 class FrameGrabber(threading.Thread):
-    def __init__(self, proc):
+    def __init__(self, proc, first_frame=None):
         super().__init__(daemon=True)
         self.proc = proc
         self.lock = threading.Lock()
-        self.latest = None
+        self.latest = first_frame
         self.last_update = time.time()
         self.running = True
 
@@ -381,43 +417,111 @@ class FrameGrabber(threading.Thread):
             return time.time() - self.last_update
 
 
-def _start_pipeline(base: str, port: int = PORT):
-    if not _wake_camera(base):
+# log warning/error ของ ffmpeg (เช่น "corrupt decoded frame", "concealing errors" ตอน
+# packet จากกล้องมาไม่ครบ, bind พอร์ตไม่ได้) — ดูตอนภาพเพี้ยน/ต่อ stream ไม่ได้
+FFMPEG_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".session", "ffmpeg_stream.log")
+FFMPEG_LOG_MAX = 5 * 1024 * 1024   # เกินนี้เริ่มไฟล์ใหม่ (log เต็ม SD card ไม่ได้)
+
+
+def _open_ffmpeg_log(base: str, port: int):
+    os.makedirs(os.path.dirname(FFMPEG_LOG), exist_ok=True)
+    try:
+        if os.path.getsize(FFMPEG_LOG) > FFMPEG_LOG_MAX:
+            os.replace(FFMPEG_LOG, FFMPEG_LOG + ".old")
+    except OSError:
+        pass
+    log = open(FFMPEG_LOG, "a", encoding="utf-8", errors="replace")
+    log.write(f"\n── {time.strftime('%F %T')} เริ่ม pipeline {base} port={port} ──\n")
+    log.flush()
+    return log
+
+
+def _start_pipeline(base: str, port: int = PORT,
+                    stop_event: Optional[threading.Event] = None):
+    def stopped():
+        return stop_event is not None and stop_event.is_set()
+
+    if not _wake_camera(base, stop_event) or stopped():
         return None
     _http_get(base, "/gopro/camera/control/wired_usb?p=1")
     _http_get(base, "/gopro/camera/stream/stop", silent=True)
     time.sleep(0.3)
+
+    # กล้องบางสถานะตอบ stream/start 200 แต่ไม่ส่งภาพ (status 55 = 0) → โหลด preset ปกติก่อน
+    if not _preview_available(base, tries=2):
+        print(f"  [Detect] กล้องยังไม่พร้อมส่ง preview (status 55=0) → โหลด preset {LIVE_PRESET_ID}")
+        _http_get(base, f"/gopro/camera/presets/load?id={LIVE_PRESET_ID}")
+        if not _preview_available(base):
+            print("  [Detect] โหลด preset แล้วกล้องก็ยังไม่พร้อมส่ง preview")
+            return None
+    if stopped():
+        return None
+
     # ?port= ให้แต่ละกล้องยิง UDP มาคนละพอร์ต → เปิด stream หลายช่องพร้อมกันได้
     if _http_get(base, f"/gopro/camera/stream/start?port={port}") != 200:
         return None
-    cmd = ["ffmpeg", "-loglevel", "warning",
-           "-fflags", "nobuffer", "-flags", "low_delay",
-           "-f", "mpegts", "-i", f"udp://@0.0.0.0:{port}?overrun_nonfatal=1&fifo_size=5000000",
-           "-vf", f"scale={WIDTH}:{HEIGHT}", "-f", "rawvideo", "-pix_fmt", "bgr24", "-"]
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
-                            stderr=subprocess.DEVNULL, bufsize=FRAME_SIZE)
-    ready, _, _ = select.select([proc.stdout], [], [], FIRST_FRAME_TIMEOUT)
-    if not ready:
+
+    # - probesize/analyzeduration ต่ำ: stream มี track ที่ ffmpeg หา parameter ไม่เจอ (ac3 0 channel, data)
+    #   ค่า default ทำให้รอ probe ~5 วิ แล้วเล่นภาพค้างใน buffer (วัดได้: เฟรมแรก 8.0s → 1.7s)
+    # - fifo_size หน่วยเป็น packet 188 byte: 20000 ≈ 3.8 MB (เดิม 5000000 ≈ 940 MB → ดีเลย์สะสม)
+    # - -map 0:v:0 ไม่ต้อง demux/decode เสียง
+    # - discardcorrupt = ทิ้งเฟรมที่ decode พังไปเลย (ไม่ส่งภาพบล็อก/สีเพี้ยนออกมา)
+    #   ignore_err กัน ffmpeg ตายเวลาเจอ NALU/packet เสียรัวๆ ตอนสาย USB หลุดสั้นๆ
+    cmd = ["ffmpeg", "-nostdin", "-loglevel", "warning",
+           "-fflags", "nobuffer+discardcorrupt", "-flags", "low_delay",
+           "-err_detect", "ignore_err",
+           "-probesize", "500000", "-analyzeduration", "500000",
+           "-f", "mpegts", "-i", f"udp://@0.0.0.0:{port}?overrun_nonfatal=1&fifo_size=20000",
+           "-map", "0:v:0", "-an", "-sn", "-dn",
+           "-vf", f"scale={WIDTH}:{HEIGHT}:flags=fast_bilinear",
+           "-f", "rawvideo", "-pix_fmt", "bgr24", "-"]
+    log_path = FFMPEG_LOG
+    # ffmpeg dup fd ของ log เก็บไว้ใช้เอง — ปิด handle ฝั่ง python ได้เลยหลัง Popen
+    with _open_ffmpeg_log(base, port) as err_log:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                stderr=err_log, bufsize=FRAME_SIZE)
+
+    # รอเฟรมแรกเป็นช่วงสั้นๆ เพื่อให้ยกเลิกได้ระหว่างรอ
+    deadline = time.time() + FIRST_FRAME_TIMEOUT
+    ready = []
+    while not ready and time.time() < deadline and not stopped():
+        ready, _, _ = select.select([proc.stdout], [], [], 0.5)
+
+    # select() คืน ready ตอน ffmpeg ตาย (EOF) ด้วย → ต้องได้ครบ 1 เฟรมจริงถึงนับว่าสำเร็จ
+    raw = _read_exact(proc.stdout, FRAME_SIZE) if ready else None
+    if raw is None:
         proc.terminate()
         try:
             proc.wait(timeout=2)
         except subprocess.TimeoutExpired:
             proc.kill()
         _http_get(base, "/gopro/camera/stream/stop", silent=True)
+        if ready:
+            print(f"  [Detect] ffmpeg ปิดตัวเองก่อนได้เฟรมแรก — ดูสาเหตุใน {log_path}")
+        elif not stopped():
+            print(f"  [Detect] ไม่ได้ภาพภายใน {FIRST_FRAME_TIMEOUT}s (udp:{port})")
         return None
-    grabber = FrameGrabber(proc)
+
+    first = np.frombuffer(raw, np.uint8).reshape((HEIGHT, WIDTH, 3))
+    grabber = FrameGrabber(proc, first_frame=first)
     grabber.start()
     return proc, grabber
 
 
-def _connect(base: str, max_tries: int, port: int = PORT):
+def _connect(base: str, max_tries: int, port: int = PORT,
+             stop_event: Optional[threading.Event] = None):
     for attempt in range(1, max_tries + 1):
+        if stop_event is not None and stop_event.is_set():
+            return None
         print(f"  [Detect] เชื่อมต่อ {base} (udp:{port}) รอบที่ {attempt}/{max_tries}")
-        pipeline = _start_pipeline(base, port)
+        pipeline = _start_pipeline(base, port, stop_event)
         if pipeline:
             return pipeline
         if attempt < max_tries:
-            time.sleep(RECONNECT_GAP)
+            if stop_event is not None:
+                stop_event.wait(RECONNECT_GAP)
+            else:
+                time.sleep(RECONNECT_GAP)
     return None
 
 
@@ -470,7 +574,7 @@ def run(camera_ip: str,
     ka_stop = threading.Event()
     threading.Thread(target=_keep_alive, args=(base, ka_stop), daemon=True).start()
 
-    pipeline = _connect(base, RECONNECT_MAX, stream_port)
+    pipeline = _connect(base, RECONNECT_MAX, stream_port, stop_event)
     if pipeline is None:
         print(f"  [Detect] เชื่อมต่อไม่สำเร็จ {RECONNECT_MAX} รอบ — หยุด")
         ka_stop.set()
@@ -490,7 +594,7 @@ def run(camera_ip: str,
             if (not grabber.running) or grabber.stale_for() > STREAM_STALE_TIMEOUT:
                 _stop_pipeline(proc, grabber, base)
                 time.sleep(1.0)
-                pipeline = _connect(base, RECONNECT_MAX, stream_port)
+                pipeline = _connect(base, RECONNECT_MAX, stream_port, stop_event)
                 if pipeline is None:
                     break
                 proc, grabber = pipeline

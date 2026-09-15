@@ -44,6 +44,20 @@ def _prep_cam(cam, log=print):
         if not pl:
             log(f"  [!] {cam.name}: load_preset({config.PRESET_ID}) FAILED")
 
+    # ตั้งความละเอียดก่อน fps (เช่น 4K/240 → 1080/240 เป็นคู่ที่ถูกต้องทุกขั้น)
+    for setting_id, option, label in ((2, config.VIDEO_RES_CODE, "resolution"),
+                                      (3, config.VIDEO_FPS_CODE, "fps")):
+        if option is None:
+            continue
+        cam.wait_ready(timeout=4)
+        if not cam.apply_setting(setting_id, option):
+            log(f"  [!] {cam.name}: ตั้ง {label} (setting {setting_id}={option}) ไม่สำเร็จ "
+                f"— กล้องอาจไม่รองรับ จะอัดตามค่าของ preset")
+
+    # รอกล้องสลับ preset เสร็จ (busy=0) ก่อนถึงเวลากด shutter
+    if not cam.wait_ready(timeout=6):
+        log(f"  [!] {cam.name}: กล้องยัง busy หลังโหลด preset")
+
 
 def _cam_state_summary(cam) -> dict:
     """อ่าน state กล้อง คืน dict สรุป"""
@@ -55,16 +69,17 @@ def _cam_state_summary(cam) -> dict:
     return {
         "encoding": bool(status.get("10", 0)),
         "mode":     settings.get("2"),
+        "fps":      settings.get("3"),
         "battery":  status.get("70"),
     }
 
 
-def _verify_encoding(cam, log=print) -> bool:
-    """ตรวจว่ากล้องกำลัง encode จริง (status.10=1)"""
+def _verify_encoding(cam, log=print):
+    """ตรวจว่ากล้องกำลัง encode จริง (status.10=1) — คืน None ถ้าอ่าน state ไม่ได้"""
     summary = _cam_state_summary(cam)
     if not summary:
         log(f"  [!] {cam.name}: ไม่สามารถอ่าน state")
-        return False
+        return None
     enc = summary.get("encoding", False)
     log(f"  {cam.name}: state → encoding={enc}, "
         f"mode={summary.get('mode')}, batt={summary.get('battery')}")
@@ -90,7 +105,7 @@ def prepare_cycle(channel, log=print, ch_index: int = 0):
     for cam in cams:
         s = _cam_state_summary(cam)
         if s:
-            log(f"  {cam.name}: mode={s.get('mode')}, "
+            log(f"  {cam.name}: mode={s.get('mode')}, fps={s.get('fps')}, "
                 f"encoding={s.get('encoding')}, batt={s.get('battery')}")
         else:
             log(f"  [!] {cam.name}: อ่าน state ไม่ได้")
@@ -105,7 +120,8 @@ def prepare_cycle(channel, log=print, ch_index: int = 0):
 def record_cycle(channel, before, log=print, ch_index: int = 0, on_phase=None):
     """
     START recording ทันทีหลัง countdown จบ (ต้องเรียก prepare_cycle ก่อน)
-    คืน list ของ path ที่ดาวน์โหลดได้
+    คืน list ของ {"path", "cam", "directory", "filename"} ที่ดาวน์โหลดได้
+    (cam/directory/filename ใช้ลบไฟล์ต้นฉบับบนกล้องทีหลัง หลังอัปคลาวด์สำเร็จ)
     on_phase (optional): callback(phase, remaining) — phase = "recording"|"downloading"
                          ใช้ให้ web API รายงานสถานะแบบเรียลไทม์
     """
@@ -127,7 +143,11 @@ def record_cycle(channel, before, log=print, ch_index: int = 0, on_phase=None):
     log(f"{channel.name}: ตรวจ encoding state...")
     for cam in cams:
         encoding = _verify_encoding(cam, log)
-        if not encoding:
+        if encoding is None:
+            # อ่าน state ไม่ได้ ≠ ไม่ได้อัด — อย่ากด shutter ซ้ำทันที อ่านใหม่อีกครั้งก่อน
+            time.sleep(1.0)
+            encoding = _verify_encoding(cam, log)
+        if encoding is False:
             for retry in range(1, ENCODING_RETRY_MAX + 1):
                 log(f"  {cam.name}: [retry {retry}/{ENCODING_RETRY_MAX}] "
                     f"enable_wired_control + start_recording")
@@ -168,7 +188,7 @@ def record_cycle(channel, before, log=print, ch_index: int = 0, on_phase=None):
     result = save.download_new_files(
         channel, before, config.DOWNLOAD_ROOT, stamp, wait=config.DOWNLOAD_WAIT
     )
-    saved = [p for paths in result.values() for p in paths]
+    saved = [item for items in result.values() for item in items]
     if saved:
         log(f"{channel.name}: saved {len(saved)} file(s) → "
             f"{config.DOWNLOAD_ROOT}/{stamp}/{channel.name}/")

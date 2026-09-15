@@ -28,6 +28,22 @@ LANE_ID = os.getenv("LANE_ID", "1").strip() or "1"
 PORT = int(os.getenv("PORT", "8080"))
 PRESET_ID = int(os.getenv("PRESET_ID", "262144"))
 RECORD_SECONDS = int(os.getenv("RECORD_SECONDS", "10"))
+
+
+def _as_opt_int(value):
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+# ความละเอียด / fps ที่ตั้งให้กล้องหลังโหลด preset (เว้นว่าง = ใช้ค่าที่มากับ preset)
+#   setting 2 (resolution): 1=4K, 4=2.7K, 9=1080
+#   setting 3 (fps)       : 0=240, 1=120, 5=60, 8=30
+# อัด 1080p ตรงจากกล้อง = Pi ไม่ต้อง decode/ย่อภาพ 4K → แปลงไฟล์เร็วขึ้น ~2 เท่า (ไฟล์ปลายทางเป็น 1080p อยู่แล้ว)
+# แต่ได้ผลใกล้กันกับ TRANSCODE_HWACCEL=drm ที่ยังอัด 4K อยู่ — ใช้อย่างใดอย่างหนึ่งก็พอ
+VIDEO_RES_CODE = _as_opt_int(os.getenv("VIDEO_RES_CODE"))
+VIDEO_FPS_CODE = _as_opt_int(os.getenv("VIDEO_FPS_CODE"))
 DOWNLOAD_ROOT = os.getenv("DOWNLOAD_ROOT", "downloads")
 DOWNLOAD_WAIT = int(os.getenv("DOWNLOAD_WAIT", "30"))   # รอ finalize สูงสุด 30s
 # ไฟล์ใต้ DOWNLOAD_ROOT ที่เก่ากว่านี้ (วัน) จะถูกลบโดย cleanup_downloads.py (รันผ่าน cron ทุกวัน)

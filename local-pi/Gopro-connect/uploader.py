@@ -13,6 +13,7 @@ uploader.py — สะพานเชื่อมสนาม → คลาว�
   CLOUD_URL=https://dl.yourdomain.com
   CLOUD_API_KEY=<API_KEY เดียวกับใน .env ของ server>
   CLOUD_UPLOAD=1
+  DELETE_AFTER_UPLOAD=1   # อัปคลาวด์สำเร็จแล้ว → ลบไฟล์ต้นฉบับบนกล้อง GoPro กันเมมเต็ม
 """
 import json
 import os
@@ -22,9 +23,12 @@ import time
 
 import requests
 
+from gopro import GoProCamera
+
 CLOUD_URL = (os.getenv("CLOUD_URL") or "").rstrip("/")
 API_KEY = os.getenv("CLOUD_API_KEY", "")
 ENABLED = os.getenv("CLOUD_UPLOAD", "1").lower() in ("1", "true", "yes")
+DELETE_AFTER_UPLOAD = os.getenv("DELETE_AFTER_UPLOAD", "1").lower() in ("1", "true", "yes")
 TIMEOUT = int(os.getenv("CLOUD_TIMEOUT", "180"))
 QUEUE_FILE = os.path.join(os.path.dirname(__file__), ".session", "upload_queue.json")
 
@@ -109,13 +113,20 @@ def register_session(code: str, pin: str, lane: int) -> bool:
 
 
 def upload_clip(path: str, code: str, sub_no: int, pin: str = "", lane: int = 0,
-                duration_s: float = 0):
-    """โยนคลิปเข้าคิว — คืนทันที ไม่บล็อกการทำงานที่สนาม"""
+                duration_s: float = 0, gopro_ip: str = "", gopro_port: int = 8080,
+                gopro_directory: str = "", gopro_filename: str = ""):
+    """
+    โยนคลิปเข้าคิว — คืนทันที ไม่บล็อกการทำงานที่สนาม
+    gopro_* (ถ้าให้มา): ไฟล์ต้นฉบับบนกล้อง — ใช้ลบทิ้งอัตโนมัติหลังอัปคลาวด์สำเร็จ
+    (ดู DELETE_AFTER_UPLOAD ด้านบน)
+    """
     if not enabled():
         return
     _push({
         "path": os.path.abspath(path), "code": code, "sub_no": sub_no,
         "pin": pin, "lane": lane, "duration_s": duration_s, "tries": 0,
+        "gopro_ip": gopro_ip, "gopro_port": gopro_port,
+        "gopro_directory": gopro_directory, "gopro_filename": gopro_filename,
     })
     _save_queue()
     print(f"  [upload] เข้าคิว {code}-{sub_no} ({os.path.basename(path)})")
@@ -147,6 +158,7 @@ def _upload_one(job: dict) -> bool:
         if r.ok:
             mb = os.path.getsize(path) / 1024 ** 2
             print(f"  [upload] ✅ {job['code']}-{job['sub_no']} ({mb:.1f} MB)")
+            _delete_from_gopro(job)
             return True
         # 404 = ไม่มีเซสชันนี้บนคลาวด์ / 400 = ไฟล์เสีย → ลองใหม่ก็ไม่ช่วย
         if r.status_code in (400, 404):
@@ -156,6 +168,26 @@ def _upload_one(job: dict) -> bool:
     except Exception as e:
         print(f"  [upload] ส่งไม่สำเร็จ ({e}) — จะลองใหม่")
     return False
+
+
+def _delete_from_gopro(job: dict):
+    """
+    ลบไฟล์ต้นฉบับบนตัวกล้อง GoPro — เรียกทันทีหลังคลิปนี้อัปขึ้นคลาวด์สำเร็จแล้วเท่านั้น
+    ป้องกันกล้องเมมเต็ม (คลิปยิงหลายรอบ/วัน ไม่มีใครไปลบมือ)
+    ล้มเหลวได้โดยไม่กระทบงานอัป — กล้องอาจปิดไปแล้วตอนนี้ ไม่ต้อง retry ไม่ต้องเข้าคิว
+    """
+    if not DELETE_AFTER_UPLOAD:
+        return
+    ip = job.get("gopro_ip")
+    directory = job.get("gopro_directory")
+    filename = job.get("gopro_filename")
+    if not (ip and directory and filename):
+        return
+    try:
+        cam = GoProCamera(name=ip, ip=ip, port=job.get("gopro_port") or 8080, timeout=10)
+        cam.delete_media(directory, filename)
+    except Exception as e:
+        print(f"  [upload] ลบไฟล์บนกล้อง {ip} ไม่สำเร็จ (เก็บไว้ในกล้องต่อไป): {e}")
 
 
 def _worker():

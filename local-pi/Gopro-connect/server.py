@@ -30,6 +30,7 @@ import os
 import queue
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 import traceback
@@ -48,6 +49,7 @@ import config
 import display
 import detect_stream
 import recorder
+import session_reports
 import uploader
 from gopro import GoProCamera
 from channel import Channel, run_parallel
@@ -102,33 +104,216 @@ def clips_dir(ch: int) -> str:
     return d
 
 
-def transcode_web(src: str, log=print) -> str:
+# hardware decode ตอนแปลงไฟล์ (TRANSCODE_HWACCEL=drm บน Pi 5) — ว่าง = ใช้ CPU
+# วัดบน Pi 5: decode 4K HEVC ด้วย CPU กินเวลาเกินครึ่งของการแปลง, drm เร็วกว่า ~2.8 เท่า และภาพเหมือนเดิม (SSIM 1.0)
+# ถ้าใช้ไม่ได้จะถอยกลับไปแปลงด้วย CPU ให้เอง
+TRANSCODE_HWACCEL = (os.getenv("TRANSCODE_HWACCEL") or "").strip()
+# preset ของ x264 — พอ decode ด้วย hardware แล้ว encode กลายเป็นส่วนที่ช้าสุด superfast จึงเร็วกว่า veryfast (เดิม) ชัด
+# ไฟล์ใหญ่ขึ้น ~3 เท่าแต่อัปโหลดเร็วอยู่แล้ว (ultrafast เร็วสุดแต่ปิด deblock/CABAC — ไฟล์นี้เป็นต้นฉบับของไฟล์ขายบนคลาวด์)
+TRANSCODE_PRESET = (os.getenv("TRANSCODE_PRESET") or "superfast").strip()
+
+
+TRANSCODE_TIMEOUT = 900   # วินาที — กันแปลงค้างจนคิวไม่เดิน
+
+
+def _transcode_cmd(src: str, out: str, hwaccel: str = "") -> list[str]:
+    # ไฟล์นี้ถูกอัปขึ้นคลาวด์เป็นต้นฉบับของไฟล์ขาย (render slow-mo ด้วย setpts)
+    # → ต้องคงเฟรมเรตเดิม (240fps) ห้ามลด ไม่งั้นคลิป slow-mo ที่ลูกค้าซื้อจะกระตุก
+    # -progress pipe:1 = ffmpeg รายงานเลขเฟรมทาง stdout → ใช้ทำแถบ % บนหน้าเว็บ
+    cmd = ["ffmpeg", "-nostdin", "-y", "-nostats", "-progress", "pipe:1"]
+    if hwaccel:
+        cmd += ["-hwaccel", hwaccel]
+    cmd += ["-i", src,
+            "-vf", "scale=-2:1080", "-c:v", "libx264", "-preset", TRANSCODE_PRESET,
+            "-crf", "22", "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-an",
+            "-f", "mp4", out]
+    # nice: ให้ server/กล้อง/ภาพสดได้ CPU ก่อน — แปลงไฟล์ช้าลงนิดหน่อยได้ แต่ระบบหน้างานต้องไม่ค้าง
+    if shutil.which("nice"):
+        cmd = ["nice", "-n", "10"] + cmd
+    return cmd
+
+
+def _count_frames(src: str) -> int:
+    """จำนวนเฟรมจาก header ของไฟล์ (เร็ว ไม่ต้องอ่านทั้งไฟล์) — 0 ถ้าหาไม่ได้"""
+    try:
+        r = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=nb_frames,avg_frame_rate:format=duration", "-of", "json", src],
+            capture_output=True, text=True, timeout=20,
+        )
+        info = json.loads(r.stdout or "{}")
+        st = (info.get("streams") or [{}])[0]
+        if str(st.get("nb_frames", "")).isdigit():
+            return int(st["nb_frames"])
+        num, _, den = str(st.get("avg_frame_rate", "0/1")).partition("/")
+        fps = float(num) / float(den or 1)
+        return int(float(info.get("format", {}).get("duration", 0)) * fps)
+    except Exception:
+        return 0
+
+
+def _run_transcode(cmd: list[str], total_frames: int, on_progress) -> tuple[int, str]:
+    """รัน ffmpeg พร้อมอ่านความคืบหน้า — คืน (returncode, ท้าย stderr)"""
+    with tempfile.TemporaryFile() as err:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=err, text=True)
+        killer = threading.Timer(TRANSCODE_TIMEOUT, proc.kill)
+        killer.start()
+        try:
+            for line in proc.stdout:
+                if line.startswith("frame=") and total_frames and on_progress:
+                    try:
+                        frame = int(line.split("=", 1)[1].strip())
+                    except ValueError:
+                        continue
+                    on_progress(min(99, frame * 100 // total_frames))
+            proc.wait()
+        finally:
+            killer.cancel()
+        err.seek(0)
+        return proc.returncode, err.read().decode(errors="ignore")[-200:]
+
+
+def transcode_file(src: str, out: str, on_progress=None, log=print) -> bool:
     """
     แปลงไฟล์จากกล้อง (HEVC 4K) → H.264 1080p ที่เล่นได้ทุกเบราว์เซอร์/Android
-    ต้นฉบับ HEVC ย้ายเก็บใน originals/ ข้างๆ — คืน path ไฟล์ใหม่ (หรือไฟล์เดิมถ้าแปลงไม่สำเร็จ)
+    on_progress(percent) ถูกเรียกระหว่างแปลง — คืน True ถ้าได้ไฟล์ out ครบ
     """
-    if not src.lower().endswith((".mp4", ".mov")):
-        return src
-    tmp = src + ".web.tmp.mp4"
-    cmd = ["ffmpeg", "-y", "-i", src,
-           "-vf", "scale=-2:1080", "-c:v", "libx264", "-preset", "veryfast",
-           "-crf", "22", "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-an", tmp]
-    try:
-        r = subprocess.run(cmd, capture_output=True, timeout=900)
-        if r.returncode != 0:
-            raise RuntimeError(r.stderr.decode(errors="ignore")[-200:])
-        orig_dir = os.path.join(os.path.dirname(src), "originals")
-        os.makedirs(orig_dir, exist_ok=True)
-        shutil.move(src, os.path.join(orig_dir, os.path.basename(src)))
-        os.replace(tmp, src)   # ไฟล์หลักกลายเป็น H.264 ชื่อเดิม
-        return src
-    except Exception as e:
-        log(f"  [!] แปลง H.264 ไม่สำเร็จ ({e}) — ใช้ไฟล์เดิม")
+    total = _count_frames(src)
+    t0 = time.time()
+    code, err = -1, ""
+    if TRANSCODE_HWACCEL:
+        code, err = _run_transcode(_transcode_cmd(src, out, TRANSCODE_HWACCEL), total, on_progress)
+        if code != 0:
+            log(f"  [!] แปลงด้วย -hwaccel {TRANSCODE_HWACCEL} ไม่สำเร็จ — ถอยไปใช้ CPU")
+            if on_progress:
+                on_progress(0)
+    if code != 0:
+        code, err = _run_transcode(_transcode_cmd(src, out), total, on_progress)
+    if code != 0:
+        log(f"  [!] แปลง H.264 ไม่สำเร็จ ({err.strip()}) — ใช้ไฟล์เดิม")
         try:
-            os.remove(tmp)
+            os.remove(out)
         except OSError:
             pass
-        return src
+        return False
+    log(f"  แปลง H.264 เสร็จใน {time.time() - t0:.0f}s")
+    return True
+
+
+# ═══ ClipProcessor: แปลงไฟล์ + อัปขึ้นคลาวด์เบื้องหลัง ═════════════════════════════
+# รอบอัดจบทันทีหลังดาวน์โหลดจากกล้อง → ลูกค้ากลับไปดูภาพสด/อัดรอบใหม่ได้เลย ไม่ต้องเห็นหน้าจอโหลด
+# หน้าเว็บแสดงแถบ % เล็กๆ จาก processing_for() แทน
+
+class ClipProcessor:
+
+    def __init__(self):
+        self._q: queue.Queue = queue.Queue()
+        self._lock = threading.Lock()
+        self._jobs: list[dict] = []    # งานที่รอคิว + กำลังแปลง
+        # ทำทีละงาน — แปลงพร้อมกันหลายไฟล์จะแย่ง CPU กับภาพสด/AI ของลูกค้าคนต่อไป
+        threading.Thread(target=self._worker, daemon=True, name="clip-processor").start()
+
+    def enqueue(self, ch: int, code: str, pin: str, src: str, base_name: str, log=print,
+                gopro: dict | None = None):
+        """
+        ย้ายไฟล์ที่เพิ่งดาวน์โหลดไปพักใน clips/chN/pending/ (ไม่โผล่ในรายการคลิป) แล้วเข้าคิว
+        เลขคลิป (sub_no) นับรวมงานที่ยังค้างในคิวด้วย — อัดติดกันหลายรอบเลขจะไม่ซ้ำ
+        gopro = {"ip", "port", "directory", "filename"} ของไฟล์ต้นฉบับบนกล้อง
+                → ส่งต่อให้ uploader ลบไฟล์ในกล้องหลังอัปคลาวด์สำเร็จ (DELETE_AFTER_UPLOAD)
+        """
+        ext = os.path.splitext(src)[1].lower() or ".mp4"
+        d = clips_dir(ch)
+        pending_dir = os.path.join(d, "pending")
+        os.makedirs(pending_dir, exist_ok=True)
+        with self._lock:
+            waiting = sum(1 for j in self._jobs if j["ch"] == ch and j["code"] == code)
+            job = {
+                "ch": ch, "code": code, "pin": pin,
+                "sub_no": len(scan_clips(ch, code)) + waiting + 1,
+                "src": os.path.join(pending_dir, base_name + ext),
+                "final": os.path.join(d, base_name + ext),
+                "progress": 0, "converting": False, "log": log, "gopro": gopro or {},
+            }
+            if os.path.abspath(src) != os.path.abspath(job["src"]):
+                shutil.move(src, job["src"])
+            self._jobs.append(job)
+        self._q.put(job)
+        log(f"ส่งคลิป {base_name} เข้าคิวแปลงไฟล์เบื้องหลัง (รอคิว {waiting} งาน)")
+
+    def recover(self, channels):
+        """
+        ตอนเปิด server: คลิปที่ค้างใน pending/ (เช่นรีสตาร์ทระหว่างแปลง) → เข้าคิวใหม่
+        ไฟล์ .part ที่แปลงค้างครึ่งทาง → ลบทิ้ง (จะแปลงใหม่จากต้นฉบับใน pending/)
+        """
+        for ch in channels:
+            d = clips_dir(ch)
+            for f in os.listdir(d):
+                if f.endswith(".part"):
+                    try:
+                        os.remove(os.path.join(d, f))
+                    except OSError:
+                        pass
+            pending_dir = os.path.join(d, "pending")
+            if not os.path.isdir(pending_dir):
+                continue
+            files = sorted(
+                (os.path.join(pending_dir, f) for f in os.listdir(pending_dir)
+                 if f.lower().endswith(VIDEO_EXTS)),
+                key=os.path.getmtime,
+            )
+            for p in files:
+                base_name = os.path.splitext(os.path.basename(p))[0]
+                code = base_name.split("_", 1)[0]
+                # PIN ไม่ได้เก็บไว้ — ไม่เป็นไร เซสชันลงทะเบียนบนคลาวด์ไปแล้วตอนลูกค้าตั้ง PIN
+                self.enqueue(ch, code, "", p, base_name,
+                             log=lambda m, ch=ch: print(f"  [ch{ch}] {m}"))
+
+    def processing_for(self, ch: int, code: str | None) -> dict:
+        """สถานะที่หน้าเว็บใช้ทำแถบโหลด — เฉพาะคลิปของเซสชันนี้ (ลูกค้าคนใหม่ไม่เห็นงานของคนก่อน)"""
+        with self._lock:
+            jobs = [j for j in self._jobs if j["ch"] == ch and j["code"] == code] if code else []
+        active = next((j for j in jobs if j["converting"]), None)
+        return {"count": len(jobs), "progress": active["progress"] if active else (0 if jobs else None)}
+
+    def _worker(self):
+        while True:
+            job = self._q.get()
+            try:
+                self._process(job)
+            except Exception:
+                traceback.print_exc()
+                with self._lock:
+                    if job in self._jobs:
+                        self._jobs.remove(job)
+
+    def _process(self, job: dict):
+        log = job["log"]
+        src, final = job["src"], job["final"]
+        tmp = final + ".part"   # ห้ามลงท้าย .mp4 — ไม่งั้นไฟล์ที่ยังแปลงไม่เสร็จจะโผล่ในรายการคลิป
+        job["converting"] = True
+        ok = transcode_file(src, tmp, on_progress=lambda p: job.__setitem__("progress", p), log=log)
+
+        # ย้ายไฟล์ + เอางานออกจากคิวใน lock เดียวกัน → นับเลขคลิปถัดไปไม่ซ้ำ/ไม่ข้าม
+        with self._lock:
+            if ok:
+                orig_dir = os.path.join(os.path.dirname(final), "originals")
+                os.makedirs(orig_dir, exist_ok=True)
+                shutil.move(src, os.path.join(orig_dir, os.path.basename(final)))
+                os.replace(tmp, final)       # คลิปโผล่ในรายการตอนนี้
+            else:
+                shutil.move(src, final)      # แปลงไม่ได้ → ใช้ไฟล์จากกล้องตรงๆ (เหมือนเดิม)
+            self._jobs.remove(job)
+        log(f"คลิปพร้อมแล้ว → {os.path.basename(final)}")
+
+        # อัปขึ้นคลาวด์ (uploader มีคิว/retry ของตัวเอง ไม่บล็อก)
+        # แนบข้อมูลไฟล์บนกล้องไปด้วย — อัปสำเร็จแล้ว uploader จะลบไฟล์ต้นฉบับบนกล้องให้เอง
+        g = job["gopro"]
+        uploader.upload_clip(
+            final, code=job["code"], sub_no=job["sub_no"],
+            pin=job["pin"], lane=job["ch"], duration_s=config.RECORD_SECONDS,
+            gopro_ip=g.get("ip", ""), gopro_port=g.get("port", 8080),
+            gopro_directory=g.get("directory", ""), gopro_filename=g.get("filename", ""),
+        )
 
 
 def scan_clips(ch: int, session_code: str | None = None) -> list[dict]:
@@ -226,9 +411,13 @@ class PreviewWorker(threading.Thread):
         ka_stop = threading.Event()
         proc = grabber = None
         try:
-            pipeline = detect_stream._connect(base, detect_stream.RECONNECT_MAX, stream_port(self.ch))
+            # ส่ง stop event เข้าไปด้วย → ถูกสั่งหยุดระหว่างกำลังต่อ stream ก็เลิกได้ทันที
+            # (เดิมต้องรอต่อเสร็จก่อน ~8-12 วิ ทำให้ไปชนกับรอบอัดที่เพิ่งเริ่ม)
+            pipeline = detect_stream._connect(base, detect_stream.RECONNECT_MAX,
+                                              stream_port(self.ch), self._stop_evt)
             if pipeline is None:
-                print(f"  [preview ch{self.ch}] เชื่อมต่อ stream ไม่สำเร็จ")
+                if not self._stop_evt.is_set():
+                    print(f"  [preview ch{self.ch}] เชื่อมต่อ stream ไม่สำเร็จ")
                 return
             proc, grabber = pipeline
 
@@ -409,7 +598,8 @@ class WebSession(threading.Thread):
             if n > 0:
                 time.sleep(1)
 
-        if not prepare_done.wait(timeout=8.0) or before_result[0] is None:
+        # เผื่อเวลาให้ prepare มากขึ้น — ช้าไปไม่กี่วิดีกว่ายกเลิกทั้งรอบ
+        if not prepare_done.wait(timeout=15.0) or before_result[0] is None:
             raise RuntimeError("เตรียมกล้องไม่สำเร็จ (prepare failed)")
 
         # ── 4) RECORDING → DOWNLOADING (สถานะอัปเดตผ่าน on_phase) ────────────
@@ -430,37 +620,26 @@ class WebSession(threading.Thread):
         if not saved:
             raise RuntimeError("ไม่ได้ไฟล์วิดีโอจากกล้อง (download failed)")
 
-        # ── 5) เปลี่ยนชื่อไฟล์เป็น {session}_{datetime} แล้วย้ายเข้าคลังคลิปของช่อง ──
+        # ── 5) ตั้งชื่อ {session}_{datetime} แล้วส่งเข้าคิวแปลงไฟล์ + อัปโหลดเบื้องหลัง ──
+        # แปลงเป็น H.264 1080p (Android เล่น HEVC ไม่ได้) ใช้เวลาเป็นนาที → ไม่ให้ลูกค้ายืนรอหน้าจอโหลด
+        # รอบอัดจบตรงนี้เลย คลิปจะโผล่ในรายการเองเมื่อแปลงเสร็จ (หน้าเว็บแสดงแถบ % จาก status.processing)
         stamp = time.strftime("%Y%m%d_%H%M%S")
-        dest_dir = clips_dir(self.ch)
         self.clips = []
-        # คลิปที่มีอยู่แล้วของเซสชันนี้ → เลขคลิปถัดไปเริ่มจากตรงนี้ (S1-0021-1, -2, ...)
-        next_sub = len(scan_clips(self.ch, self.code)) + 1
-        for i, p in enumerate(saved):
-            ext = os.path.splitext(p)[1].lower() or ".mp4"
+        for i, item in enumerate(saved):
+            p, cam = item["path"], item["cam"]
             suffix = "" if len(saved) == 1 else f"_{i + 1}"
-            dest = os.path.join(dest_dir, f"{self.code}_{stamp}{suffix}{ext}")
-            try:
-                shutil.move(p, dest)
-            except Exception as e:
-                self._log(f"[!] ย้ายไฟล์ไม่สำเร็จ ({e}) — ใช้ตำแหน่งเดิม")
-                dest = p
-            # แปลงเป็น H.264 1080p ให้เล่นได้ทุกอุปกรณ์ (Android เล่น HEVC ไม่ได้)
-            self._log("กำลังแปลงไฟล์เป็น H.264 สำหรับเล่นบนเว็บ...")
-            dest = transcode_web(dest, log=self._log)
-            self.clips.append(os.path.basename(dest))
-            self._log(f"บันทึกคลิป → {os.path.basename(dest)}")
-
-            # ส่งขึ้นคลาวด์เบื้องหลัง — ไม่บล็อก ลูกค้าเดินออกได้เลย
-            uploader.upload_clip(
-                dest, code=self.code, sub_no=next_sub + i,
-                pin=self.pin, lane=self.ch, duration_s=config.RECORD_SECONDS,
+            base_name = f"{self.code}_{stamp}{suffix}"
+            processor.enqueue(
+                self.ch, self.code, self.pin, p, base_name, log=self._log,
+                gopro={"ip": cam.ip, "port": cam.port,
+                       "directory": item["directory"], "filename": item["filename"]},
             )
+            self.clips.append(base_name + (os.path.splitext(p)[1].lower() or ".mp4"))
 
         self.state = "DONE"
         self.done_at = time.time()
         display.show_qr(self.ch)
-        self._log(f"เสร็จสิ้น — ได้ {len(self.clips)} คลิป")
+        self._log(f"เสร็จสิ้น — ได้ {len(self.clips)} คลิป (กำลังแปลงไฟล์เบื้องหลัง)")
 
 
 # ═══ LaneManager: ทุกช่อง + online monitor ═══════════════════════════════════
@@ -477,6 +656,10 @@ class LaneManager:
         self.occupied_until: dict[int, float] = {}
         # visit = การใช้งานของลูกค้า 1 คน: {code, started} — จบเมื่อออกจากช่อง (heartbeat หมดอายุ)
         self.visits: dict[int, dict | None] = {}
+        # ช่องที่กำลังเริ่มรอบอัด (รอภาพสดปิดอยู่) — ห้ามเปิดภาพสดใหม่แทรกระหว่างนี้
+        self.starting: set[int] = set()
+        # keep_alive พลาดติดกันกี่ครั้ง — พลาดครั้งเดียวยังไม่ถือว่าออฟไลน์
+        self._offline_hits: dict[int, int] = {}
         self._lock = threading.Lock()
 
         for ch_cfg in config.load_channels():
@@ -489,6 +672,8 @@ class LaneManager:
         threading.Thread(target=self._online_monitor, daemon=True).start()
 
     # ── online check ทุก 5 วิ (ข้ามช่องที่กำลังทำงาน — ไม่รบกวนกล้อง) ────────
+
+    OFFLINE_AFTER = 3   # keep_alive พลาดติดกันกี่รอบถึงขึ้นออฟไลน์ (~15 วิ)
 
     def _online_monitor(self):
         """
@@ -505,16 +690,21 @@ class LaneManager:
                     self.online[ch] = False
                     continue
                 sess = self.sessions.get(ch)
-                if (sess and sess.is_busy()) or self.preview_active(ch):
+                if (sess and sess.is_busy()) or self.preview_active(ch) or ch in self.starting:
                     self.online[ch] = True   # กำลังใช้งาน = ออนไลน์แน่นอน ไม่ต้องยุ่งกับกล้อง
+                    self._offline_hits[ch] = 0
                     continue
                 try:
                     ok = bool(cams[0].keep_alive())   # keep_alive = เช็ค online + กันหลับ ในคำสั่งเดียว
                     if ok and tick % 6 == 1:
                         cams[0].enable_wired_control()
-                    self.online[ch] = ok
                 except Exception:
-                    self.online[ch] = False
+                    ok = False
+                # กล้องตอบช้าครั้งเดียว (เช่นตอนเขียนไฟล์) ไม่ควรทำให้ปุ่มอัดกดไม่ได้
+                self._offline_hits[ch] = 0 if ok else self._offline_hits.get(ch, 0) + 1
+                self.online[ch] = ok or (
+                    self.online.get(ch, False) and self._offline_hits[ch] < self.OFFLINE_AFTER
+                )
             time.sleep(5)
 
     # ── preview (ภาพสดตอน idle) ──────────────────────────────────────────────
@@ -528,7 +718,7 @@ class LaneManager:
         if channel is None:
             raise HTTPException(404, f"ไม่พบช่อง {ch}")
         sess = self.sessions.get(ch)
-        if sess and sess.is_busy():
+        if ch in self.starting or (sess and sess.is_busy()):
             return {"ok": False, "reason": "busy"}
         # กลับเข้าหน้าช่องหลัง session จบ → เคลียร์เป็น IDLE
         # (DONE ต้องพ้น 6 วิก่อน เพื่อให้หน้าเว็บทันเห็นและเด้งไปเปิดวิดีโอ)
@@ -542,6 +732,10 @@ class LaneManager:
             return {"ok": False, "reason": "no_camera"}
 
         with self._lock:
+            # เช็คซ้ำใน lock — กันกรณี start_process เพิ่งเริ่มระหว่างที่เช็คข้างบน
+            sess = self.sessions.get(ch)
+            if ch in self.starting or (sess and sess.is_busy()):
+                return {"ok": False, "reason": "busy"}
             w = self.previews.get(ch)
             if w and w.is_alive():
                 w.heartbeat()   # ต่ออายุ preview เดิม
@@ -576,6 +770,10 @@ class LaneManager:
             print(f"  [ch{ch}] จบเซสชัน {v['code']} (ผู้ใช้ออกจากช่อง)")
             self.visits[ch] = None
             v = None
+            # เคลียร์ WebSession เก่า (state DONE/ERROR ค้างอยู่) ไปด้วย — ไม่งั้นตอนสถานะ
+            # ถูกเรียกอีกที status()["session"]["code"] จะยังโผล่รหัสเดิม แม้ sessionCode
+            # (จาก visit) เป็น null แล้ว → ทำให้จอเว็บเห็นเหมือนเซสชันเดิมยังไม่จบ
+            self.sessions.pop(ch, None)
         if v is None and create:
             v = {"code": next_session_code(ch), "started": time.time(), "pin": None}
             self.visits[ch] = v
@@ -602,6 +800,42 @@ class LaneManager:
         print(f"  [ch{ch}] ตั้ง PIN ให้เซสชัน {v['code']} แล้ว")
         return {"ok": True, "code": v["code"], "existing": False}
 
+    def end_visit(self, ch: int, action: str = "skip", staff: dict | None = None) -> dict:
+        """
+        จบเซสชันปัจจุบันของช่องนี้ทันที (popup "จบการใช้งาน" ที่จอ)
+        เคลียร์ visit + ปลดจอง occupancy เลย ไม่ต้องรอ heartbeat หมดอายุ (OCCUPY_TTL)
+        → ลูกค้าคนต่อไปเข้าเลนนี้จะได้เซสชัน/รหัสใหม่ทันที ไม่เห็นคลิปของคนก่อน
+        คลิปที่ยังแปลงไฟล์อยู่เบื้องหลังจะทำต่อจนเสร็จและอัปขึ้นคลาวด์ตามปกติ
+
+        action = "confirm" (มีผู้ดูแล staff ได้ค่าคอมมิชชั่น) | "skip" (ไม่ระบุผู้ดูแล)
+        → บันทึกรายงานจบเซสชันไว้ในเครื่อง แล้วส่งขึ้นคลาวด์เบื้องหลัง (session_reports.py)
+        """
+        sess = self.sessions.get(ch)
+        if ch in self.starting or (sess and sess.is_busy()):
+            state = "PREPARING" if ch in self.starting else sess.state
+            raise HTTPException(409, f"ช่อง {ch} กำลังทำงาน (state={state}) — รอให้เสร็จก่อน")
+        v = self.visits.get(ch)
+        code = v["code"] if v else None
+
+        report = None
+        if code:
+            # นับคลิปที่พร้อมแล้ว + ที่ยังแปลงไฟล์อยู่เบื้องหลัง (ของเซสชันนี้)
+            clip_count = len(scan_clips(ch, code)) + processor.processing_for(ch, code)["count"]
+            report = session_reports.record_session_end(
+                code, ch, v.get("started"), clip_count, action, staff)
+
+        self.visits[ch] = None
+        self.occupied_until[ch] = 0
+        if sess:
+            self.sessions.pop(ch, None)
+        if code:
+            who = f"ผู้ดูแล: {staff['name']}" if staff else "ไม่ระบุผู้ดูแล"
+            print(f"  [ch{ch}] จบเซสชัน {code} เอง (กดปุ่มจบการใช้งาน, {who})")
+        return {
+            "ok": True, "code": code, "action": action, "staff": staff,
+            "report_id": report["report_id"] if report else None,
+        }
+
     def touch_occupancy(self, ch: int):
         if ch in self.channels:
             # เช็ค visit เก่าหมดอายุก่อนต่ออายุ occupancy (ลำดับสำคัญ)
@@ -618,7 +852,11 @@ class LaneManager:
             return True                      # เปิดภาพสดอยู่ = มีคนอยู่หน้าช่อง
         return time.time() < self.occupied_until.get(ch, 0)
 
-    def start_process(self, ch: int, skip_detect: bool = False) -> WebSession:
+    # รอภาพสดปิดได้นานสุดเท่านี้ (ต่อ stream ค้าง + ปิด ffmpeg + สั่งกล้องหยุด stream)
+    PREVIEW_STOP_WAIT = 20.0
+
+    def start_process(self, ch: int, skip_detect: bool = False) -> "WebSession | None":
+        """คืน None ถ้าช่องนี้กำลังเริ่มอยู่แล้ว (กดปุ่มซ้ำระหว่างรอ)"""
         channel = self.channels.get(ch)
         if channel is None:
             raise HTTPException(404, f"ไม่พบช่อง {ch}")
@@ -627,23 +865,39 @@ class LaneManager:
         if not self.online.get(ch):
             raise HTTPException(409, f"กล้องช่อง {ch} ออฟไลน์")
 
-        # หยุด idle preview ก่อน — detect_stream จะเปิด stream ของมันเอง (พอร์ต UDP เดียวกัน)
-        self.stop_preview(ch, wait=True)
-
         with self._lock:
             existing = self.sessions.get(ch)
             if existing and existing.is_busy():
                 raise HTTPException(409, f"ช่อง {ch} กำลังทำงาน (state={existing.state})")
-            self.touch_occupancy(ch)
-            visit = self.current_visit(ch, create=True)
-            if uploader.enabled() and not visit.get("pin"):
-                raise HTTPException(409, "ยังไม่ได้ตั้ง PIN สำหรับดาวน์โหลดคลิป")
-            session = WebSession(ch, channel, self.frames[ch],
-                                 visit["code"], visit.get("pin") or "",
-                                 skip_detect=skip_detect)
-            self.sessions[ch] = session
+            if ch in self.starting:
+                return None
+            # จองไว้ก่อน → heartbeat ภาพสดจากหน้าเว็บจะเปิด preview ใหม่แทรกไม่ได้
+            self.starting.add(ch)
 
-        session.start()
+        try:
+            # หยุด idle preview ให้จบ "จริง" ก่อน — detect_stream ใช้พอร์ต UDP เดียวกัน
+            # และ preview ตอนปิดจะสั่ง stream/stop ใส่กล้อง ถ้าปิดช้ากว่ารอบอัดจะไปตัด stream ของรอบอัด
+            w = self.previews.get(ch)
+            if w and w.is_alive():
+                w.stop()
+                w.join(timeout=self.PREVIEW_STOP_WAIT)
+                if w.is_alive():
+                    raise HTTPException(409, "ภาพสดยังปิดไม่เสร็จ กรุณากดใหม่อีกครั้ง")
+
+            with self._lock:
+                self.touch_occupancy(ch)
+                visit = self.current_visit(ch, create=True)
+                if uploader.enabled() and not visit.get("pin"):
+                    raise HTTPException(409, "ยังไม่ได้ตั้ง PIN สำหรับดาวน์โหลดคลิป")
+                session = WebSession(ch, channel, self.frames[ch],
+                                     visit["code"], visit.get("pin") or "",
+                                     skip_detect=skip_detect)
+                self.sessions[ch] = session
+                session.start()   # start ใน lock → is_busy() เป็นจริงก่อนปลดจองช่อง
+        finally:
+            with self._lock:
+                self.starting.discard(ch)
+
         print(f"  [ch{ch}] session {session.code} เริ่มต้น (จากหน้าเว็บ)")
         return session
 
@@ -659,6 +913,9 @@ class LaneManager:
         # DONE หมดอายุใน 6 วิ → กลับเป็น IDLE (กัน overlay "เสร็จแล้ว" ค้างเมื่อกลับมาหน้าช่อง)
         if state == "DONE" and sess.done_at and time.time() - sess.done_at > 6:
             state = "IDLE"
+        # กำลังรอภาพสดปิดก่อนเริ่มรอบอัด → ให้หน้าเว็บขึ้น "กำลังเตรียม" + ปิดปุ่มกันกดซ้ำ
+        if ch in self.starting and not (sess and sess.is_busy()):
+            state = "PREPARING"
         return {
             "channel": ch,
             "online": self.online.get(ch, False),
@@ -681,10 +938,14 @@ class LaneManager:
             } if sess else None,
             "clipCount": len(clips),
             "latestClip": clips[-1] if clips else None,
+            # คลิปของเซสชันนี้ที่กำลังแปลงไฟล์เบื้องหลัง → หน้าเว็บทำแถบโหลดเล็กๆ
+            "processing": processor.processing_for(ch, vcode),
         }
 
 
+processor = ClipProcessor()
 manager = LaneManager()
+processor.recover(manager.channels)
 
 # ═══ FastAPI app ══════════════════════════════════════════════════════════════
 
@@ -710,6 +971,8 @@ def start_process(ch: int, body: dict | None = None):
     """body: {"skipDetect": true} → ปุ่ม "ข้าม AI" ข้ามการตรวจจับท่า เข้า countdown ทันที"""
     skip_detect = bool((body or {}).get("skipDetect"))
     session = manager.start_process(ch, skip_detect=skip_detect)
+    if session is None:   # กดซ้ำระหว่างกำลังเริ่ม — ไม่ต้องขึ้น error ให้ลูกค้า
+        return {"ok": True, "state": "PREPARING"}
     return {"ok": True, "code": session.code, "state": session.state}
 
 
@@ -720,6 +983,34 @@ def occupy(ch: int):
         raise HTTPException(404, f"ไม่พบช่อง {ch}")
     manager.touch_occupancy(ch)
     return {"ok": True}
+
+
+@app.get("/api/staff")
+def staff_list():
+    """รายชื่อผู้ดูแลสำหรับ popup จบการใช้งาน — คลาวด์ → cache ในเครื่อง → staff.json"""
+    return session_reports.get_staff()
+
+
+@app.post("/api/channels/{ch}/end")
+def end_session(ch: int, body: dict | None = None):
+    """
+    popup "จบการใช้งาน" ที่จอ — เคลียร์เซสชันทันที ไม่ต้องรอ heartbeat หมดอายุ
+    body: {"action": "confirm", "staff_id": "3"} → จบ + ระบุผู้ดูแลที่ได้ค่าคอมมิชชั่น
+          {"action": "skip"} หรือไม่ส่ง body    → จบโดยไม่ระบุผู้ดูแล
+    (ปุ่ม "ย้อนกลับ" แค่ปิด popup ฝั่งหน้าเว็บ ไม่เรียก API)
+    """
+    if ch not in manager.channels:
+        raise HTTPException(404, f"ไม่พบช่อง {ch}")
+    body = body or {}
+    action = str(body.get("action") or "skip").strip().lower()
+    if action not in ("confirm", "skip"):
+        raise HTTPException(400, "action ต้องเป็น confirm หรือ skip")
+    staff = None
+    if action == "confirm":
+        staff = session_reports.find_staff(body.get("staff_id"))
+        if staff is None:
+            raise HTTPException(400, "ไม่พบผู้ดูแลที่เลือก — ปิดแล้วเปิดรายชื่อใหม่อีกครั้ง")
+    return manager.end_visit(ch, action=action, staff=staff)
 
 
 @app.post("/api/channels/{ch}/pin")
@@ -897,4 +1188,5 @@ if __name__ == "__main__":
     print(f"  http://0.0.0.0:{SERVER_PORT}")
     print("=" * 50)
     uploader.start()
+    session_reports.start()   # ส่งรายงานจบเซสชัน/ผู้ดูแลที่ค้างอยู่ขึ้นคลาวด์เบื้องหลัง
     uvicorn.run(app, host="0.0.0.0", port=SERVER_PORT)

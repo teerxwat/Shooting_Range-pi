@@ -108,15 +108,51 @@ class GoProCamera:
         return self._get("/gopro/camera/state", timeout=timeout,
                          retries=retries, silent=True)
 
+    def _status(self) -> dict:
+        """status ของกล้อง ({} ถ้าอ่านไม่ได้)"""
+        return (self.get_state(timeout=3, retries=0) or {}).get("status", {})
+
+    def wait_ready(self, timeout=8.0):
+        """
+        รอจนกล้องว่าง: status 8 (busy) = 0 และ status 10 (encoding) = 0
+        กล้องตอบ shutter/start ไม่สำเร็จถ้ายังโหลด preset / เขียนไฟล์ค้างอยู่
+        """
+        end = time.time() + timeout
+        while time.time() < end:
+            s = self._status()
+            if s.get("8") == 0 and s.get("10") == 0:
+                return True
+            time.sleep(0.3)
+        print(f"  [{self.name}] wait_ready: กล้องยังไม่ว่างหลัง {timeout:.0f}s")
+        return False
+
     # ---- commands ----
+    # timeout สั้น (4s) — ถ้ากล้องค้าง จะได้ไม่กินเวลาเตรียมกล้องจนเกิน countdown
     def enable_wired_control(self):
-        return self._get("/gopro/camera/control/wired_usb?p=1", retries=2) is not None
+        return self._get("/gopro/camera/control/wired_usb?p=1", timeout=4, retries=2) is not None
 
     def load_preset(self, preset_id):
-        return self._get(f"/gopro/camera/presets/load?id={preset_id}", retries=2) is not None
+        return self._get(f"/gopro/camera/presets/load?id={preset_id}", timeout=4, retries=2) is not None
 
-    def start_recording(self):
-        return self._get("/gopro/camera/shutter/start", retries=2) is not None
+    def apply_setting(self, setting_id, option):
+        """ตั้งค่ากล้อง เช่น resolution (setting 2), fps (setting 3) — กล้องตอบ error ถ้าไม่รองรับค่านั้น"""
+        return self._get(f"/gopro/camera/setting?setting={setting_id}&option={option}",
+                         timeout=4, retries=1) is not None
+
+    def start_recording(self, attempts=3):
+        """
+        รอกล้องว่างก่อนกด shutter + ลองใหม่เมื่อกล้องตอบ error (เดิม retry เฉพาะตอนต่อไม่ติด)
+        ถ้า request ก่อนหน้าหมดเวลาแต่กล้องเริ่มอัดไปแล้ว → ถือว่าสำเร็จ ไม่กดซ้ำ
+        """
+        for attempt in range(1, attempts + 1):
+            if attempt > 1 and self._status().get("10") == 1:
+                return True
+            self.wait_ready()
+            if self._get("/gopro/camera/shutter/start", timeout=5) is not None:
+                return True
+            if attempt < attempts:
+                time.sleep(0.7)
+        return False
 
     def stop_recording(self):
         return self._get("/gopro/camera/shutter/stop", retries=3, retry_wait=1.5) is not None
@@ -131,12 +167,12 @@ class GoProCamera:
         คืน True ถ้า stream/start สำเร็จ
         """
         # หยุด stream เก่าก่อน (ถ้ามีค้างอยู่)
-        self._get("/gopro/camera/stream/stop", silent=True)
+        self._get("/gopro/camera/stream/stop", timeout=4, silent=True)
         time.sleep(0.3)
-        ok = self._get("/gopro/camera/stream/start") is not None
+        ok = self._get("/gopro/camera/stream/start", timeout=4) is not None
         if ok:
             time.sleep(0.5)
-            self._get("/gopro/camera/stream/stop", silent=True)
+            self._get("/gopro/camera/stream/stop", timeout=4, silent=True)
             time.sleep(0.3)
         if log:
             log(f"  {self.name}: prime_stream → {'activated ✓' if ok else 'skip (stream/start failed)'}")
@@ -153,10 +189,15 @@ class GoProCamera:
                     files.add((directory, f.get("n", "")))
         return files
 
+    # รอข้อมูลก้อนถัดไปได้นานสุด (วินาที) — ปกติไหล ~35 MB/s แต่กล้องชอบค้างส่ง 0.1-0.2 MB สุดท้าย
+    # (log จริง: ค้างจนครบ 45s แล้ว resume เสร็จทันที) → ตั้งสั้นให้ resume เร็ว ไม่ต้องรอเกือบนาที
+    DOWNLOAD_READ_TIMEOUT = 6
+    DOWNLOAD_RETRY_WAIT = 1.0
+
     def download(self, directory, filename, dest_folder, retries=5):
         """
         ดาวน์โหลดไฟล์วิดีโอจาก GoPro พร้อม progress log + retry
-        - timeout=(15, 45): connect 15s, รอ chunk สูงสุด 45s
+        - timeout=(15, DOWNLOAD_READ_TIMEOUT): connect 15s, ข้อมูลเงียบเกินกำหนด → resume ต่อ
         - ก่อน retry ทุกครั้ง: ส่ง keep_alive + enable_wired_control ปลุกกล้อง
         - รองรับ HTTP Range (resume ต่อจากที่ค้างไว้)
         """
@@ -178,7 +219,7 @@ class GoProCamera:
                     headers["Range"] = f"bytes={written}-"
                     print(f"  [{self.name}]   resume จาก {written/(1024*1024):.1f} MB...")
 
-                with _session.get(url, stream=True, timeout=(15, 45),
+                with _session.get(url, stream=True, timeout=(15, self.DOWNLOAD_READ_TIMEOUT),
                                   params=params, headers=headers) as r:
                     # 206 = Partial Content (server รองรับ resume), 200 = ไม่รองรับ → เริ่มใหม่
                     if written > 0 and r.status_code == 200:
@@ -210,6 +251,11 @@ class GoProCamera:
                             if total and written >= total:
                                 break
 
+                # กล้องปิดการเชื่อมต่อก่อนส่งครบ → อย่านับว่าสำเร็จ (เดิมได้ไฟล์ไม่ครบแต่ขึ้น ✓)
+                if total and written < total:
+                    raise requests.exceptions.ConnectionError(
+                        f"ได้ไม่ครบ {written/(1024*1024):.1f}/{total_mb:.1f} MB")
+
                 print(f"  [{self.name}] download ✓ ({written/(1024*1024):.1f} MB)")
                 return dest
 
@@ -218,14 +264,14 @@ class GoProCamera:
                 print(f"  [{self.name}] download error (ครั้ง {attempt}/{retries}): {short}")
 
                 if attempt < retries:
-                    print(f"  [{self.name}]   ปลุกกล้อง + รอ 3s แล้วลองใหม่...")
+                    print(f"  [{self.name}]   ปลุกกล้อง + รอ {self.DOWNLOAD_RETRY_WAIT:g}s แล้วลองใหม่...")
                     # ปลุกกล้องก่อน retry — ป้องกันกล้องหลับระหว่าง download
                     try:
                         self.keep_alive()
                         self.enable_wired_control()
                     except Exception:
                         pass
-                    time.sleep(3)
+                    time.sleep(self.DOWNLOAD_RETRY_WAIT)
 
         # ล้างไฟล์ที่โหลดไม่สมบูรณ์
         if os.path.exists(dest):
@@ -235,6 +281,30 @@ class GoProCamera:
                 pass
         print(f"  [{self.name}] download ล้มเหลวทั้ง {retries} ครั้ง — ข้ามไฟล์นี้")
         return None
+
+    def delete_media(self, directory, filename, retries=2):
+        """
+        ลบไฟล์ต้นฉบับบนตัวกล้อง (เรียกหลังอัปคลิปขึ้นคลาวด์สำเร็จแล้วเท่านั้น)
+        กันเมมกล้องเต็ม — ตัดสินใจลบง่ายๆ: ขึ้นคลาวด์แล้ว = ไม่ต้องเก็บซ้ำในกล้องอีก
+        """
+        path = f"{directory}/{filename}"
+        # ใส่ path ใน URL ตรงๆ ตามรูปแบบในเอกสาร Open GoPro (?path=100GOPRO/GX010001.MP4)
+        # ไม่ผ่าน params ของ requests ที่จะเข้ารหัส "/" เป็น %2F
+        url = f"{self.base}/gopro/media/delete/file?path={path}"
+        for attempt in range(retries + 1):
+            try:
+                r = _session.get(url, params=self._params(), timeout=self.timeout)
+                if r.status_code == 200:
+                    print(f"  [{self.name}] ลบไฟล์บนกล้องแล้ว: {path}")
+                    return True
+                print(f"  [{self.name}] ลบไฟล์บนกล้องไม่สำเร็จ HTTP {r.status_code}: {path}")
+                return False
+            except requests.exceptions.RequestException as e:
+                if attempt < retries:
+                    time.sleep(1.5)
+                else:
+                    print(f"  [{self.name}] ลบไฟล์บนกล้องไม่สำเร็จ: {e}")
+        return False
 
     @classmethod
     def from_config(cls, cam_config, port, timeout=10):

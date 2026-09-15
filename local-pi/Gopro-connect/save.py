@@ -58,7 +58,7 @@ def download_new_files(channel, before, download_root, stamp, wait=12):
     """
     หาไฟล์ที่เพิ่งเกิดใหม่ของแต่ละกล้องในเลน แล้วดาวน์โหลดพร้อมกัน
     before: {cam_name: set(files)} จาก snapshot ก่อนถ่าย
-    คืน {cam_name: [paths...]}
+    คืน {cam_name: [{"path", "cam", "directory", "filename"}, ...]}
     """
     cams = {c.name: c for c in channel.active_cameras}
     new_map = {}                     # cam_name -> (camera, set(new_files))
@@ -96,13 +96,19 @@ def download_new_files(channel, before, download_root, stamp, wait=12):
 
     def _do(task):
         cam, directory, filename, dest = task
-        return cam.name, cam.download(directory, filename, dest)
+        path = cam.download(directory, filename, dest)
+        return cam.name, path, cam, directory, filename
 
     if tasks:
         with ThreadPoolExecutor(max_workers=len(tasks)) as pool:
-            for cam_name, path in pool.map(_do, tasks):
+            for cam_name, path, cam, directory, filename in pool.map(_do, tasks):
                 if path:
-                    results[cam_name].append(path)
+                    # เก็บ cam/directory/filename ติดไปด้วย — ใช้ลบไฟล์ต้นฉบับบนกล้อง
+                    # ทีหลัง หลังคลิปนี้อัปขึ้นคลาวด์สำเร็จแล้ว (ดู uploader.py)
+                    results[cam_name].append({
+                        "path": path, "cam": cam,
+                        "directory": directory, "filename": filename,
+                    })
 
     # กล้องที่ไม่เจอไฟล์ใหม่ = ยังอยู่ใน pending
     for name in pending:
