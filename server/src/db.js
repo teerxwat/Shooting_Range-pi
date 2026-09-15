@@ -9,7 +9,7 @@
  *
  * ตารางแบ่ง 2 กลุ่ม
  *   ชั่วคราว (ลบเมื่อไฟล์หมดอายุ) : sessions, videos, orders
- *   ถาวร (ไม่ลบเลย)              : payments, events  ← สถิติย้อนหลังอยู่ตรงนี้
+ *   ถาวร (ไม่ลบเลย)              : payments, events, staff, session_ends, commission_payouts
  */
 import mysql from 'mysql2/promise';
 import { config, ensureDirs } from './config.js';
@@ -116,6 +116,66 @@ const TABLES = [
      KEY idx_pay_sess (session_code)
    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 
+  // ─────────── ผู้ดูแล + ค่าคอมมิชชั่น (ดู STAFF_COMMISSION_API.md) ───────────
+
+  // รายชื่อผู้ดูแล + เรทค่าคอม — ห้ามลบแถว (ลาออก = active 0) ประวัติค่าคอมผูก id ไว้
+  `CREATE TABLE IF NOT EXISTS staff (
+     id                BIGINT AUTO_INCREMENT PRIMARY KEY,
+     name              VARCHAR(100)  NOT NULL,
+     phone             VARCHAR(32),
+     commission_type   VARCHAR(10)   NOT NULL DEFAULT 'fixed',  -- fixed | percent
+     commission_value  DECIMAL(10,2) NOT NULL DEFAULT 0,        -- fixed = บาท/เซสชัน, percent = % ยอดขายเซสชัน
+     lanes             JSON,                                    -- NULL = ทุกเลน, [1,2] = เฉพาะเลน
+     active            TINYINT(1)    NOT NULL DEFAULT 1,
+     note              VARCHAR(255),
+     created_at        DATETIME(3)   NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+     updated_at        DATETIME(3)   NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+     KEY idx_staff_active (active)
+   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+  // รายงานจบเซสชันจากจอที่เลน (ถาวร) — snapshot ชื่อ/เรทไว้ แก้ตาราง staff ทีหลังไม่กระทบย้อนหลัง
+  `CREATE TABLE IF NOT EXISTS session_ends (
+     id             BIGINT AUTO_INCREMENT PRIMARY KEY,
+     report_id      VARCHAR(36)   NOT NULL,           -- UUID จาก Pi กันส่งซ้ำ
+     session_code   VARCHAR(64)   NOT NULL,
+     lane           INT,
+     channel        INT,
+     device         VARCHAR(64),
+     started_at     DATETIME(3),
+     ended_at       DATETIME(3)   NOT NULL,
+     duration_s     INT,
+     clip_count     INT           NOT NULL DEFAULT 0,
+     action         VARCHAR(10)   NOT NULL,           -- confirm | skip
+     staff_id       BIGINT,                           -- NULL = skip หรือหา id ไม่เจอ
+     staff_name     VARCHAR(100),
+     rate_type      VARCHAR(10),
+     rate_value     DECIMAL(10,2),
+     staff_matched  TINYINT(1)    NOT NULL DEFAULT 0,
+     raw            JSON,
+     received_at    DATETIME(3)   NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+     UNIQUE KEY uq_report (report_id),
+     KEY idx_se_code (session_code),
+     KEY idx_se_staff (staff_id, ended_at),
+     KEY idx_se_ended (ended_at)
+   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+  // ปิดยอดจ่ายค่าคอม (ถาวร) — detail เก็บ snapshot รายการเซสชัน/ยอดขาย/เรทที่ใช้คิด
+  `CREATE TABLE IF NOT EXISTS commission_payouts (
+     id            BIGINT AUTO_INCREMENT PRIMARY KEY,
+     staff_id      BIGINT        NOT NULL,
+     period_from   DATETIME(3)   NOT NULL,
+     period_to     DATETIME(3)   NOT NULL,
+     sessions      INT           NOT NULL,
+     revenue       INT           NOT NULL,
+     amount        DECIMAL(12,2) NOT NULL,
+     status        VARCHAR(12)   NOT NULL DEFAULT 'pending', -- pending | paid | void
+     detail        JSON,
+     note          VARCHAR(255),
+     created_at    DATETIME(3)   NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+     paid_at       DATETIME(3),
+     KEY idx_payout_staff (staff_id, period_from)
+   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
   // log ทุกเหตุการณ์ในระบบ
   `CREATE TABLE IF NOT EXISTS events (
      id            BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -184,6 +244,10 @@ async function migrate() {
  *   order.render_failed     เรนเดอร์ไม่สำเร็จ
  *   order.download          กดดาวน์โหลด (นับซ้ำได้)
  *   session.expired         ถูกลบเพราะหมดอายุ
+ *   session.ended           จอที่เลนรายงานจบเซสชัน (+ ผู้ดูแล)
+ *   session.staff_changed   แอดมินแก้ผู้ดูแลของเซสชัน
+ *   staff.created / staff.updated               จัดการรายชื่อผู้ดูแล
+ *   commission.payout_created / _paid / _void   ปิดยอด / จ่าย / ยกเลิกค่าคอม
  */
 export function logEvent(type, f = {}) {
   q(

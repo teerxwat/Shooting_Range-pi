@@ -70,6 +70,87 @@ for (const n of [1, 2]) {
   ok(`อัปคลิปที่ ${n}`, r.ok === true, JSON.stringify(r));
 }
 
+// ── 2.1 ผู้ดูแล + ค่าคอมมิชชั่น (STAFF_COMMISSION_API.md) ──
+// รันก่อนขั้นจ่ายเงิน เพราะเครื่องจริง (PAYGW_URL) จะหยุด selftest ที่ 402
+// ข้อมูลในตารางถาวร: ใช้ผู้ดูแลชื่อ SELFTEST คนเดิมทุกรอบ, ปิด active ตอนจบ, งวดค่าคอมถูก void, เซสชันถูกเปลี่ยนเป็น skip
+{
+  const AH = { ...ADMIN, 'Content-Type': 'application/json' };
+  const call = async (method, url, body, headers = AH) => {
+    const r = await fetch(BASE + url, { method, headers, body: body && JSON.stringify(body) });
+    return { status: r.status, body: await json(r) };
+  };
+  const today = new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10);   // วันที่ไทย
+  const STAFF_NAME = 'SELFTEST (ทดสอบระบบ)';
+
+  ok('ค่าคอม: ปฏิเสธ percent เกิน 100',
+    (await call('POST', '/api/admin/staff', { name: 'x', commission_type: 'percent', commission_value: 150 })).status === 400);
+
+  const list = await call('GET', '/api/admin/staff');
+  let staffId = list.body.items?.find((s) => s.name === STAFF_NAME)?.id;
+  if (!staffId) {
+    const c = await call('POST', '/api/admin/staff', { name: STAFF_NAME, commission_type: 'fixed', commission_value: 50, lanes: [1] });
+    staffId = c.body.id;
+    ok('ค่าคอม: เพิ่มผู้ดูแล', c.status === 201 && staffId > 0, JSON.stringify(c));
+  }
+  const up = await call('PATCH', `/api/admin/staff/${staffId}`,
+    { active: true, commission_type: 'fixed', commission_value: 50, lanes: [1] });
+  ok('ค่าคอม: แก้ข้อมูลผู้ดูแล', up.status === 200, JSON.stringify(up));
+
+  const lane1 = await call('GET', '/api/ingest/staff?lane=1', null, H);
+  const lane2 = await call('GET', '/api/ingest/staff?lane=2', null, H);
+  ok('ค่าคอม: dropdown ที่เลนกรองตามเลน',
+    lane1.body.staff?.some((s) => s.id === staffId) && !lane2.body.staff?.some((s) => s.id === staffId),
+    JSON.stringify({ lane1: lane1.body, lane2: lane2.body }));
+
+  const report = {
+    report_id: crypto.randomUUID(), session_code: CODE, lane: 1, channel: 1, device: 'selftest',
+    started_at: new Date(Date.now() - 3600e3).toISOString(), ended_at: new Date().toISOString(),
+    duration_s: 3600, clip_count: 2, action: 'confirm', staff: { id: staffId, name: STAFF_NAME },
+  };
+  const end1 = await call('POST', `/api/ingest/sessions/${CODE}/end`, report, H);
+  ok('ค่าคอม: รับรายงานจบเซสชัน', end1.status === 201 && end1.body.staff_matched === true, JSON.stringify(end1));
+  ok('ค่าคอม: ส่งซ้ำ report_id เดิม → 409',
+    (await call('POST', `/api/ingest/sessions/${CODE}/end`, report, H)).status === 409);
+  ok('ค่าคอม: payload ผิด → 400',
+    (await call('POST', `/api/ingest/sessions/${CODE}/end`, { ...report, report_id: crypto.randomUUID(), action: 'x' }, H)).status === 400);
+
+  const ends = await call('GET', `/api/admin/session-ends?staff_id=${staffId}&from=${today}&to=${today}`);
+  const se = ends.body.items?.find((r) => r.report_id === report.report_id);
+  ok('ค่าคอม: /admin/session-ends คิดค่าคอม fixed ถูก', se?.commission === 50 && se?.staff_matched === true, JSON.stringify(ends.body));
+
+  const com = await call('GET', `/api/admin/commissions?from=${today}&to=${today}`);
+  const mine = com.body.items?.find((r) => r.staff_id === staffId);
+  ok('ค่าคอม: /admin/commissions สรุปรายคน', mine?.commission >= 50 && mine?.outstanding >= 50, JSON.stringify(com.body));
+
+  // งวดที่ค้าง pending จากรอบก่อน (เช่นรอบก่อนพังกลางทาง) → void ทิ้ง ไม่งั้นช่วงเวลาซ้อน
+  const old = await call('GET', `/api/admin/commission-payouts?staff_id=${staffId}&status=pending`);
+  for (const p of old.body.items || []) await call('PATCH', `/api/admin/commission-payouts/${p.id}`, { status: 'void' });
+
+  const po = await call('POST', '/api/admin/commission-payouts', { staff_id: staffId, from: today, to: today, note: 'selftest' });
+  ok('ค่าคอม: ปิดยอดงวด', po.status === 201 && po.body.amount >= 50 && po.body.status === 'pending', JSON.stringify(po));
+  ok('ค่าคอม: ปิดยอดช่วงซ้อน → 409',
+    (await call('POST', '/api/admin/commission-payouts', { staff_id: staffId, from: today, to: today })).status === 409);
+  ok('ค่าคอม: แก้เซสชันในงวดที่ปิดยอดแล้ว → 409',
+    (await call('PATCH', `/api/admin/session-ends/${se?.id}`, { staff_id: null })).status === 409);
+
+  const detail = await call('GET', `/api/admin/commission-payouts/${po.body.id}`);
+  ok('ค่าคอม: รายละเอียดงวดมี snapshot เซสชัน',
+    detail.body.detail?.sessions?.some((s) => s.session_end_id === se?.id), JSON.stringify(detail.body));
+
+  ok('ค่าคอม: void งวด', (await call('PATCH', `/api/admin/commission-payouts/${po.body.id}`, { status: 'void' })).status === 200);
+  ok('ค่าคอม: งวดที่ void แล้วเปลี่ยนเป็น paid ไม่ได้ → 409',
+    (await call('PATCH', `/api/admin/commission-payouts/${po.body.id}`, { status: 'paid' })).status === 409);
+
+  const fix = await call('PATCH', `/api/admin/session-ends/${se?.id}`, { staff_id: null, note: 'selftest' });
+  const after = await call('GET', `/api/admin/session-ends?staff_id=${staffId}&from=${today}&to=${today}`);
+  ok('ค่าคอม: แอดมินแก้เซสชันเป็นไม่มีผู้ดูแล',
+    fix.status === 200 && !after.body.items?.some((r) => r.id === se?.id), JSON.stringify(fix));
+
+  await call('PATCH', `/api/admin/staff/${staffId}`, { active: false });
+  const lane1b = await call('GET', '/api/ingest/staff?lane=1', null, H);
+  ok('ค่าคอม: ผู้ดูแลที่ปิด active ไม่อยู่ใน dropdown', !lane1b.body.staff?.some((s) => s.id === staffId));
+}
+
 // ── 3. ffmpeg ทำลายน้ำ ─────────────────────────────────
 let look = null;
 process.stdout.write('  ⏳ รอ ffmpeg ทำลายน้ำ');

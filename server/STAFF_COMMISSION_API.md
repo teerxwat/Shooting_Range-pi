@@ -8,7 +8,11 @@
 | จอ kiosk (popup + dropdown + ปุ่ม ย้อนกลับ / ข้าม / ยืนยัน) | ✅ ทำแล้ว — `web/src/kiosk/components/EndSessionModal.jsx` |
 | API บน Pi (`GET /api/staff`, `POST /api/channels/{ch}/end`) | ✅ ทำแล้ว — `local-pi/Gopro-connect/server.py`, `session_reports.py` |
 | เก็บรายงานในเครื่อง + ส่งขึ้นเซิร์ฟเวอร์เบื้องหลัง | ✅ ทำแล้ว — ส่งซ้ำเองจนเซิร์ฟเวอร์รับ |
-| **เซิร์ฟเวอร์หลัก: ตาราง, ingest API, admin API, หน้าเว็บ** | ⬜ **ยังไม่ทำ — ทำตามหัวข้อ 3–5 ของเอกสารนี้** |
+| เซิร์ฟเวอร์หลัก: ตาราง (สร้างเองตอนเปิด server) | ✅ ทำแล้ว — `server/src/db.js` |
+| เซิร์ฟเวอร์หลัก: ingest API (หัวข้อ 4) | ✅ ทำแล้ว — `server/src/routes/ingest.js` |
+| เซิร์ฟเวอร์หลัก: admin API (หัวข้อ 5) | ✅ ทำแล้ว — `server/src/routes/admin.js` + `server/src/staff.js` |
+| ทดสอบอัตโนมัติ | ✅ `npm run selftest` (หัวข้อ 2.1 ในไฟล์ `selftest.js`) |
+| หน้าเว็บจัดการผู้ดูแล / รายงานค่าคอม | ⬜ ยังไม่ทำ — เรียก admin API หัวข้อ 5 |
 
 ---
 
@@ -17,11 +21,11 @@
 1. [ภาพรวมการทำงาน](#1-ภาพรวมการทำงาน)
 2. [API บน Pi (ทำแล้ว)](#2-api-บน-pi-ทำแล้ว)
 3. [Database บนเซิร์ฟเวอร์หลัก](#3-database-บนเซิร์ฟเวอร์หลัก)
-4. [Ingest API: Pi → เซิร์ฟเวอร์ (ต้องทำ)](#4-ingest-api-pi--เซิร์ฟเวอร์-ต้องทำ)
-5. [Admin API: สำหรับหน้าเว็บจัดการ (ต้องทำ)](#5-admin-api-สำหรับหน้าเว็บจัดการ-ต้องทำ)
+4. [Ingest API: Pi → เซิร์ฟเวอร์](#4-ingest-api-pi--เซิร์ฟเวอร์)
+5. [Admin API: สำหรับหน้าเว็บจัดการ](#5-admin-api-สำหรับหน้าเว็บจัดการ)
 6. [วิธีคิดค่าคอมมิชชั่น](#6-วิธีคิดค่าคอมมิชชั่น)
 7. [ทดสอบด้วย curl](#7-ทดสอบด้วย-curl)
-8. [Checklist ฝั่งเซิร์ฟเวอร์](#8-checklist-ฝั่งเซิร์ฟเวอร์)
+8. [Deploy + Checklist](#8-deploy--checklist)
 
 ---
 
@@ -161,8 +165,10 @@ Base URL: `http://<pi>:8000` (เช่น `http://7lnetwork-s2:8000`) — ไ�
 ]
 ```
 
-> **สำคัญ:** ถ้าตอนนี้ใช้ `staff.json` แล้วภายหลังย้ายรายชื่อไปเซิร์ฟเวอร์ ให้ใช้ **id ชุดเดียวกัน** กับตาราง `staff`
+> **สำคัญ:** ถ้าใช้ `staff.json` แล้วภายหลังย้ายรายชื่อไปเซิร์ฟเวอร์ ให้ใช้ **id ชุดเดียวกัน** กับตาราง `staff`
 > ไม่งั้นรายงานที่ส่งจาก `staff.json` จะหา `staff_id` ไม่เจอ (ดูหัวข้อ 4.2 ข้อ 4 — ยังเก็บชื่อไว้ให้แก้ทีหลังได้)
+>
+> สถานะ ณ 15 ก.ย. 2026: Pi `7lnetwork-s2` **ไม่มี `staff.json`** → เพิ่มผู้ดูแลที่เซิร์ฟเวอร์ได้เลย ไม่ต้องจับคู่ id
 
 ค่าใน `.env` ของ Pi
 
@@ -185,7 +191,8 @@ grep '"synced": false' ~/Desktop/Shooting_Range/v2/local-pi/Gopro-connect/.sessi
 
 ## 3. Database บนเซิร์ฟเวอร์หลัก
 
-เพิ่มใน `TABLES` ของ `server/src/db.js` (MySQL/MariaDB, `utf8mb4`, **เวลาเก็บเป็น UTC** เหมือนตารางเดิม)
+อยู่ใน `TABLES` ของ `server/src/db.js` แล้ว — **สร้างเองอัตโนมัติตอน `systemctl restart`** (`CREATE TABLE IF NOT EXISTS` ไม่แตะตารางเดิม)
+MySQL/MariaDB, `utf8mb4`, **เวลาเก็บเป็น UTC** เหมือนตารางเดิม
 
 ### 3.1 `staff` — รายชื่อผู้ดูแล + เรทค่าคอมมิชชั่น
 
@@ -213,7 +220,7 @@ CREATE TABLE IF NOT EXISTS staff (
 ```sql
 CREATE TABLE IF NOT EXISTS session_ends (
   id             BIGINT AUTO_INCREMENT PRIMARY KEY,
-  report_id      CHAR(36)      NOT NULL,          -- UUID จาก Pi ใช้กันส่งซ้ำ
+  report_id      VARCHAR(36)   NOT NULL,          -- UUID จาก Pi ใช้กันส่งซ้ำ
   session_code   VARCHAR(64)   NOT NULL,          -- เช่น S2-0101 (ผูกกับ payments.session_code)
   lane           INT,
   channel        INT,
@@ -249,7 +256,7 @@ session_ends.session_code ──┬── payments.session_code   (ถาวร 
 session_ends.staff_id ─────── staff.id                  (ไม่ใส่ FK — staff ไม่ถูกลบอยู่แล้ว)
 ```
 
-### 3.3 `commission_payouts` — ปิดยอดจ่ายค่าคอม (ทางเลือก แนะนำ)
+### 3.3 `commission_payouts` — ปิดยอดจ่ายค่าคอม
 
 ```sql
 CREATE TABLE IF NOT EXISTS commission_payouts (
@@ -269,17 +276,19 @@ CREATE TABLE IF NOT EXISTS commission_payouts (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 ```
 
-### 3.4 events ที่ควรเพิ่ม (ใช้ `logEvent` เดิม)
+### 3.4 events ที่บันทึก (ตาราง `events` เดิม — ดูได้ที่ `GET /api/admin/events`)
 
 | type | เมื่อไร | meta |
 |---|---|---|
-| `session.ended` | รับรายงานจาก Pi สำเร็จ | `{ report_id, action, staff_id, staff_name, clip_count, duration_s }` |
-| `session.staff_changed` | แอดมินแก้ผู้ดูแลของเซสชัน | `{ session_end_id, from_staff_id, to_staff_id }` |
-| `commission.payout_created` / `commission.payout_paid` | ปิดยอด / จ่ายแล้ว | `{ payout_id, staff_id, amount }` |
+| `session.ended` | รับรายงานจาก Pi สำเร็จ | `{ report_id, session_end_id, action, staff_id, staff_name, staff_matched, clip_count, duration_s }` |
+| `session.staff_changed` | แอดมินแก้ผู้ดูแลของเซสชัน | `{ session_end_id, from_staff_id, from_staff_name, to_staff_id, to_staff_name, note }` |
+| `staff.created` / `staff.updated` | เพิ่ม / แก้ผู้ดูแล | `{ staff_id, ... }` |
+| `commission.payout_created` | ปิดยอดงวด | `{ payout_id, staff_id, sessions, revenue, amount }` |
+| `commission.payout_paid` / `commission.payout_void` | จ่ายแล้ว / ยกเลิกงวด | `{ payout_id, staff_id, note }` |
 
 ---
 
-## 4. Ingest API: Pi → เซิร์ฟเวอร์ (ต้องทำ)
+## 4. Ingest API: Pi → เซิร์ฟเวอร์
 
 ไฟล์: `server/src/routes/ingest.js` — router นี้มี `requireApiKey` อยู่แล้ว (**header `X-API-Key`** ต้องตรงกับ `API_KEY`)
 
@@ -309,24 +318,6 @@ Pi เรียกทุกครั้งที่เปิด popup (timeout 3
 - **ไม่ต้องส่งเรทค่าคอม** มาที่ Pi
 
 **Errors:** `401` API key ผิด
-
-ตัวอย่าง implementation
-
-```js
-ingest.get('/staff', async (req, res, next) => {
-  try {
-    const lane = Number(req.query.lane) || null;
-    const rows = await all('SELECT id, name, lanes FROM staff WHERE active = 1 ORDER BY name');
-    const staff = rows
-      .filter((s) => {
-        const lanes = typeof s.lanes === 'string' ? JSON.parse(s.lanes) : s.lanes;
-        return !lane || !Array.isArray(lanes) || lanes.includes(lane);
-      })
-      .map((s) => ({ id: s.id, name: s.name, active: true }));
-    res.json({ staff });
-  } catch (e) { next(e); }
-});
-```
 
 ### 4.2 `POST /api/ingest/sessions/:code/end`
 
@@ -389,10 +380,10 @@ Content-Type: application/json
 | `action` | `"confirm"` \| `"skip"` | ไม่ | |
 | `staff` | `{ id: string, name: string }` | ได้ | `null` เมื่อ `action = "skip"` |
 
-**ขั้นตอนที่เซิร์ฟเวอร์ต้องทำ**
+**ขั้นตอนที่เซิร์ฟเวอร์ทำ** (โค้ดจริง: `ingest.post('/sessions/:code/end')`)
 
-1. ตรวจ `report_id`, `session_code`, `ended_at`, `action` — ขาดหรือผิดรูปแบบ → `400`
-2. `session_code` ใน body ≠ `:code` → `400`
+1. ตรวจ `report_id` (ต้องมี ≤ 36 ตัว), `action`, `ended_at` (ISO 8601), `started_at` (ถ้าส่งมาต้องเป็น ISO 8601) — ผิด → `400`
+2. `session_code` ใน body ≠ `:code` หรือยาวเกิน 64 → `400`
 3. มี `report_id` นี้แล้ว → `409` (Pi ถือว่าสำเร็จ ไม่ส่งซ้ำอีก)
 4. ถ้า `action = "confirm"`:
    - หา `staff.id` ในตาราง `staff` → เจอ: `staff_id = id`, `staff_matched = 1`, snapshot `staff_name` + `rate_type` + `rate_value` จากตาราง
@@ -411,63 +402,25 @@ Content-Type: application/json
 | `401` | `{ "error": "API key ไม่ถูกต้อง" }` | ลองใหม่ (เช็ก `CLOUD_API_KEY` บน Pi) |
 | `5xx` / timeout | — | ลองใหม่ |
 
-ตัวอย่าง implementation
-
-```js
-const toDate = (s) => (s ? new Date(s) : null);
-
-ingest.post('/sessions/:code/end', async (req, res, next) => {
-  try {
-    const b = req.body || {};
-    if (!b.report_id || !b.ended_at || !['confirm', 'skip'].includes(b.action)) {
-      return res.status(400).json({ error: 'ต้องมี report_id, ended_at และ action = confirm|skip' });
-    }
-    if (b.session_code !== req.params.code) {
-      return res.status(400).json({ error: 'session_code ไม่ตรงกับ URL' });
-    }
-    if (await one('SELECT id FROM session_ends WHERE report_id = ?', [b.report_id])) {
-      return res.status(409).json({ ok: true, duplicate: true });
-    }
-
-    let staff = null;
-    if (b.action === 'confirm' && b.staff?.id != null) {
-      staff = await one(
-        'SELECT id, name, commission_type, commission_value FROM staff WHERE id = ?',
-        [Number(b.staff.id)]
-      );
-    }
-
-    const id = await insert(
-      `INSERT INTO session_ends
-         (report_id, session_code, lane, channel, device, started_at, ended_at, duration_s,
-          clip_count, action, staff_id, staff_name, rate_type, rate_value, staff_matched, raw)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [b.report_id, b.session_code, b.lane ?? null, b.channel ?? null, b.device ?? null,
-       toDate(b.started_at), toDate(b.ended_at), b.duration_s ?? null, b.clip_count ?? 0,
-       b.action, staff?.id ?? null, staff?.name ?? b.staff?.name ?? null,
-       staff?.commission_type ?? null, staff?.commission_value ?? null,
-       staff ? 1 : 0, JSON.stringify(b)]
-    );
-
-    logEvent('session.ended', {
-      session_code: b.session_code, lane: b.lane,
-      meta: { report_id: b.report_id, action: b.action, staff_id: staff?.id ?? null,
-              staff_name: staff?.name ?? b.staff?.name ?? null, clip_count: b.clip_count },
-    });
-    res.status(201).json({ ok: true, id, staff_matched: !!staff });
-  } catch (e) {
-    if (e.errno === 1062) return res.status(409).json({ ok: true, duplicate: true }); // ชนกันพร้อมกัน
-    next(e);
-  }
-});
-```
+> ส่งพร้อมกัน 2 ครั้ง (race) → ครั้งที่สองชน unique key `uq_report` → ตอบ `409` เหมือนกัน
 
 ---
 
-## 5. Admin API: สำหรับหน้าเว็บจัดการ (ต้องทำ)
+## 5. Admin API: สำหรับหน้าเว็บจัดการ
 
-ไฟล์: `server/src/routes/admin.js` — ใช้ **header `X-Admin-Key`** เหมือน endpoint admin เดิม
-ช่วงเวลา (`from`, `to`) ใช้รูปแบบเดียวกับ `range(req)` เดิม (default 30 วันล่าสุด, คิดตามเวลาไทย)
+ไฟล์: `server/src/routes/admin.js` — ใช้ **header `X-Admin-Key`** เหมือน endpoint admin เดิม (ผิด → `401`)
+Error ทุกตัวตอบรูปแบบ `{ "error": "ข้อความภาษาไทย" }`
+
+**ช่วงเวลา `from` / `to`** (ใช้กับ 5.2, 5.4, 5.5)
+
+| รูปแบบ | ความหมาย |
+|---|---|
+| `2026-09-01` (YYYY-MM-DD) | **ทั้งวันตามเวลาไทย** — `from` = 00:00:00.000, `to` = 23:59:59.999 (+07:00) |
+| ISO 8601 เต็ม เช่น `2026-09-01T12:00:00+07:00` | ตามนั้นเป๊ะ |
+| ไม่ส่ง | `to` = ตอนนี้, `from` = 30 วันก่อน `to` (ยกเว้น 5.5 ที่บังคับส่ง) |
+| ผิดรูปแบบ / `from` หลัง `to` | `400` |
+
+Response ของ 5.2 / 5.4 มี `period: { from, to, timezone }` เป็น UTC ISO บอกช่วงที่ใช้จริง
 
 ### 5.1 จัดการรายชื่อผู้ดูแล
 
@@ -514,9 +467,14 @@ Query ทางเลือก: `?active=1` (เฉพาะคนที่ใ�
 
 Response `201` → `{ "ok": true, "id": 7 }` · `400` validation
 
+- `lanes: []` เก็บเป็น `null` (= ทุกเลน), เลขซ้ำถูกตัดออก
+- `commission_value` ปัดเป็นทศนิยม 2 ตำแหน่ง, `phone`/`note` ส่ง `""` = ลบค่า
+
 #### `PATCH /api/admin/staff/:id`
 
-ส่งเฉพาะ field ที่แก้ (field เดียวกับ POST) — Response `200` → `{ "ok": true }` · `404` ไม่พบ
+ส่งเฉพาะ field ที่แก้ (field เดียวกับ POST) — Response `200` → `{ "ok": true }` · `400` validation / ไม่มี field · `404` ไม่พบ
+
+เช็ก `percent ≤ 100` จากค่าหลังรวมค่าเดิม (เช่นแก้แค่ `commission_type` เป็น `percent` แต่ค่าเดิม 150 → `400`)
 
 > ไม่มี `DELETE` — ปิดการใช้งานด้วย `{ "active": false }`
 > การเปลี่ยนเรท **มีผลเฉพาะเซสชันที่จบหลังจากนี้** (เซสชันเก่าใช้เรทที่ snapshot ไว้)
@@ -531,17 +489,25 @@ Response `201` → `{ "ok": true, "id": 7 }` · `400` validation
 | `lane` | กรองเลน |
 | `staff_id` | กรองผู้ดูแล |
 | `action` | `confirm` \| `skip` |
-| `unmatched=1` | เฉพาะรายการที่หา `staff_id` ไม่เจอ (ต้องให้แอดมินแก้) |
+| `unmatched=1` | เฉพาะรายการที่กดยืนยันแต่หา `staff_id` ไม่เจอ (ต้องให้แอดมินแก้) |
 | `limit`, `offset` | default 100, สูงสุด 1000 |
+
+เรียงจาก `ended_at` ใหม่สุดก่อน
 
 ```json
 {
+  "period": { "from": "2026-08-31T17:00:00.000Z", "to": "2026-09-30T16:59:59.999Z", "timezone": "Asia/Bangkok" },
   "total": 58,
+  "limit": 100,
+  "offset": 0,
   "items": [
     {
       "id": 123,
+      "report_id": "8927b1b3-3a3c-4f02-ba71-0133c16e2c6d",
       "session_code": "S2-0101",
       "lane": 2,
+      "channel": 1,
+      "device": "7lnetwork-s2",
       "started_at": "2026-09-14T17:52:13.000Z",
       "ended_at": "2026-09-14T18:05:40.000Z",
       "duration_s": 807,
@@ -552,6 +518,7 @@ Response `201` → `{ "ok": true, "id": 7 }` · `400` validation
       "staff_matched": true,
       "rate_type": "percent",
       "rate_value": 10,
+      "received_at": "2026-09-14T18:05:41.120Z",
       "revenue": 500,
       "commission": 50
     }
@@ -560,6 +527,7 @@ Response `201` → `{ "ok": true, "id": 7 }` · `400` validation
 ```
 
 `revenue` = ยอดขายที่จ่ายแล้วของเซสชันนั้น, `commission` = ค่าคอมที่คำนวณ ณ ตอนเรียก (หัวข้อ 6)
+ไม่ส่ง `raw` (payload ดิบ) ออกมาในรายการ — ดูได้จากฐานข้อมูลโดยตรง
 
 ### 5.3 แก้ผู้ดูแลของเซสชัน (กดผิด / ข้ามแล้วอยากเพิ่ม / id จาก staff.json ไม่ตรง)
 
@@ -569,12 +537,15 @@ Response `201` → `{ "ok": true, "id": 7 }` · `400` validation
 { "staff_id": 9, "note": "ลูกค้าแจ้งว่าน้องสมหญิงดูแล" }
 ```
 
-- `staff_id: null` = เอาผู้ดูแลออก (เปลี่ยนเป็นไม่มีค่าคอม)
-- เซิร์ฟเวอร์ต้อง snapshot `staff_name`, `rate_type`, `rate_value` ใหม่จากตาราง `staff`, ตั้ง `action = 'confirm'` (หรือ `'skip'` เมื่อ null), `staff_matched = 1`
-- ถ้าเซสชันนี้อยู่ใน `commission_payouts` ที่ `status = 'paid'` แล้ว → `409` ห้ามแก้
+- ต้องส่ง `staff_id` เสมอ — ตัวเลข หรือ `null` = เอาผู้ดูแลออก (เปลี่ยนเป็น `skip` ไม่มีค่าคอม)
+- `note` ไม่บังคับ (≤ 255) — เก็บใน event log ไม่ได้เก็บในแถว
+- เซิร์ฟเวอร์ snapshot `staff_name`, `rate_type`, `rate_value` ใหม่จากตาราง `staff` **ณ ตอนแก้**, ตั้ง `action = 'confirm'`, `staff_matched = 1` (หรือ `skip` / ล้างค่าเมื่อ `null`)
+- ถ้า `ended_at` ของเซสชันอยู่ในงวด `commission_payouts` ที่ `pending` หรือ `paid` ของ **ผู้ดูแลคนเดิมหรือคนใหม่** → `409`
+  - งวด `pending` → `void` งวดนั้นก่อน แก้เซสชัน แล้วปิดยอดใหม่
+  - งวด `paid` → แก้ไม่ได้แล้ว
 - `logEvent('session.staff_changed', ...)`
 
-Response `200` → `{ "ok": true }` · `404` · `409`
+Response `200` → `{ "ok": true }` · `400` (ไม่ส่ง `staff_id` / ไม่พบผู้ดูแล) · `404` · `409`
 
 ### 5.4 สรุปค่าคอมมิชชั่น
 
@@ -606,9 +577,19 @@ Response `200` → `{ "ok": true }` · `404` · `409`
 }
 ```
 
-- `paid_out` = ผลรวม `commission_payouts.amount` ที่ `status = 'paid'` ในช่วงนั้น, `outstanding` = `commission - paid_out`
+- `totals` นับทุกเซสชันในช่วง (รวม skip), `items` = เฉพาะที่มีผู้ดูแล เรียงค่าคอมมากสุดก่อน
+- `staff_name` ใช้ชื่อปัจจุบันในตาราง `staff`
+- `paid_out` = ผลรวม `commission_payouts.amount` ที่ `status = 'paid'` และ **ทั้งงวดอยู่ในช่วงที่ถาม**, `outstanding` = `commission - paid_out`
+- query `lane` กรองเฉพาะ `totals` / `items` (ไม่กรอง `paid_out` เพราะงวดค่าคอมไม่แยกเลน)
 
-### 5.5 ปิดยอด / จ่ายค่าคอม (ถ้าใช้ตาราง `commission_payouts`)
+### 5.5 ปิดยอด / จ่ายค่าคอม
+
+ลำดับสถานะของงวด
+
+```
+pending ──(จ่ายแล้ว)──▶ paid   (จบ แก้ไม่ได้)
+   └────(ยกเลิก)─────▶ void   (จบ — ปิดยอดช่วงเดิมใหม่ได้)
+```
 
 #### `POST /api/admin/commission-payouts`
 
@@ -616,13 +597,24 @@ Response `200` → `{ "ok": true }` · `404` · `409`
 { "staff_id": 7, "from": "2026-09-01", "to": "2026-09-15", "note": "งวดครึ่งเดือนแรก" }
 ```
 
-เซิร์ฟเวอร์คำนวณยอด ณ ตอนนั้นแล้ว snapshot ลง `detail`:
+| field | required | คำอธิบาย |
+|---|---|---|
+| `staff_id` | ✅ | |
+| `from`, `to` | ✅ | รูปแบบเดียวกับหัวข้อ 5 (YYYY-MM-DD = ทั้งวันเวลาไทย) |
+| `note` | | ≤ 255 |
+
+เซิร์ฟเวอร์คำนวณยอด ณ ตอนนั้น (สูตรหัวข้อ 6) แล้ว snapshot ทุกเซสชันลง `detail`
+
+**Response `201`**
 
 ```json
 {
   "ok": true,
   "id": 15,
   "staff_id": 7,
+  "staff_name": "สมชาย ใจดี",
+  "period_from": "2026-08-31T17:00:00.000Z",
+  "period_to": "2026-09-15T16:59:59.999Z",
   "sessions": 32,
   "revenue": 11800,
   "amount": 1180,
@@ -630,13 +622,44 @@ Response `200` → `{ "ok": true }` · `404` · `409`
 }
 ```
 
+| status | เมื่อไร |
+|---|---|
+| `400` | `staff_id` / วันที่ผิด หรือ **ไม่มีเซสชันของคนนี้ในช่วงนั้น** |
+| `404` | ไม่พบผู้ดูแล |
+| `409` | ช่วงเวลา **ซ้อน** กับงวดเดิมของคนนี้ที่ยังไม่ `void` (กันจ่ายซ้ำ) |
+
+#### `GET /api/admin/commission-payouts?staff_id=7&status=paid&limit=100&offset=0`
+
+ประวัติงวด (ใหม่สุดก่อน, ไม่มี `detail`) → `{ total, limit, offset, items: [{ id, staff_id, staff_name, period_from, period_to, sessions, revenue, amount, status, note, created_at, paid_at }] }`
+
+#### `GET /api/admin/commission-payouts/:id`
+
+งวดเดียว + `detail`
+
+```json
+{
+  "id": 15, "staff_id": 7, "staff_name": "สมชาย ใจดี", "status": "pending", "amount": 1180,
+  "detail": {
+    "computed_at": "2026-10-01T03:00:00.000Z",
+    "staff_name": "สมชาย ใจดี",
+    "sessions": [
+      { "session_end_id": 123, "session_code": "S2-0101", "lane": 2, "ended_at": "2026-09-14T18:05:40.000Z",
+        "clip_count": 2, "revenue": 500, "rate_type": "percent", "rate_value": 10, "commission": 50 }
+    ]
+  }
+}
+```
+
 #### `PATCH /api/admin/commission-payouts/:id`
 
 ```json
-{ "status": "paid" }
+{ "status": "paid", "note": "โอนแล้ว 1 ต.ค." }
 ```
 
-`status`: `pending` → `paid` (ตั้ง `paid_at = NOW(3)`) หรือ `void` (ยกเลิก) · `GET /api/admin/commission-payouts?staff_id=&status=` สำหรับดูประวัติ
+- `status`: `paid` (ตั้ง `paid_at`) หรือ `void` — **เปลี่ยนได้เฉพาะงวดที่ `pending`** ไม่งั้น `409`
+- ส่ง `note` อย่างเดียวได้ (แก้หมายเหตุได้ทุกสถานะ)
+
+Response `200` → `{ "ok": true }` · `400` · `404` · `409`
 
 ---
 
@@ -663,16 +686,18 @@ Response `200` → `{ "ok": true }` · `404` · `409`
 
 ### 6.3 SQL สรุปต่อผู้ดูแล
 
+โค้ดจริงอยู่ที่ `REVENUE_JOIN` + `COMMISSION_EXPR` ใน `server/src/staff.js` (ใช้ร่วมกันทุก endpoint ให้ตัวเลขตรงกัน)
+
 ```sql
 SELECT se.staff_id,
-       MAX(se.staff_name)                         AS staff_name,
+       COALESCE(MAX(st.name), MAX(se.staff_name)) AS staff_name,
        COUNT(*)                                   AS sessions,
-       SUM(se.clip_count)                         AS clips,
+       COALESCE(SUM(se.clip_count), 0)            AS clips,
        COALESCE(SUM(p.revenue), 0)                AS revenue,
-       SUM(CASE se.rate_type
-             WHEN 'fixed'   THEN se.rate_value
-             WHEN 'percent' THEN COALESCE(p.revenue, 0) * se.rate_value / 100
-             ELSE 0 END)                          AS commission
+       COALESCE(SUM(CASE se.rate_type
+             WHEN 'fixed'   THEN COALESCE(se.rate_value, 0)
+             WHEN 'percent' THEN COALESCE(p.revenue, 0) * COALESCE(se.rate_value, 0) / 100
+             ELSE 0 END), 0)                      AS commission
 FROM session_ends se
 LEFT JOIN (
   SELECT session_code, SUM(amount) AS revenue
@@ -680,6 +705,7 @@ LEFT JOIN (
   WHERE status = 'paid'
   GROUP BY session_code
 ) p ON p.session_code = se.session_code
+LEFT JOIN staff st ON st.id = se.staff_id
 WHERE se.action = 'confirm'
   AND se.staff_id IS NOT NULL
   AND se.ended_at BETWEEN ? AND ?
@@ -688,12 +714,20 @@ GROUP BY se.staff_id
 ORDER BY commission DESC;
 ```
 
-### 6.4 เรื่องที่ต้องตัดสินใจก่อนทำ
+### 6.4 สิ่งที่โค้ดเลือกไว้ + ต่อยอดได้ทีหลัง
 
-- เรทแบบ **fixed / percent / ผสม** (เช่น ฐาน 30 บาท + 5%)? — ถ้าผสมให้เพิ่ม `commission_base DECIMAL(10,2)` ในทั้ง `staff` และ snapshot ใน `session_ends`
-- เซสชันที่ **ไม่มีคลิป** (`clip_count = 0`) หรือ **สั้นมาก** (เช่น `duration_s < 120`) ยังได้ค่าคอม fixed หรือไม่
-- ผู้ดูแล **หลายคนต่อเซสชัน**? — ตอนนี้ Pi ส่งได้คนเดียว ถ้าต้องการหลายคนต้องแก้ทั้ง popup และตารางเป็น `session_end_staff (session_end_id, staff_id, share)`
-- ปิดยอด **รายวัน / รายครึ่งเดือน / รายเดือน**
+ที่ทำไว้ตอนนี้
+
+- เรทแบบ **fixed หรือ percent** อย่างใดอย่างหนึ่งต่อคน
+- เซสชันที่ **ไม่มีคลิป / สั้นมาก** ที่กดยืนยัน **ยังได้ค่าคอม fixed** — ถ้าไม่ต้องการ ให้แอดมินแก้เป็น `staff_id: null` (หัวข้อ 5.3)
+- **ผู้ดูแล 1 คนต่อเซสชัน**
+- ปิดยอดได้ทุกช่วงเวลา (รายวัน / ครึ่งเดือน / เดือน) แต่ช่วงของคนเดียวกันห้ามซ้อน
+
+ถ้าต้องการเพิ่มทีหลัง
+
+- เรท **ผสม** (ฐาน 30 บาท + 5%) — เพิ่ม `commission_base DECIMAL(10,2)` ใน `staff` และ snapshot ใน `session_ends` แล้วแก้ `COMMISSION_EXPR`
+- ไม่ให้ค่าคอมเซสชันสั้น — เพิ่มเงื่อนไข `se.duration_s >= ?` ใน `COMMISSION_EXPR`
+- หลายคนต่อเซสชัน — แก้ popup + ตารางเป็น `session_end_staff (session_end_id, staff_id, share)`
 
 ---
 
@@ -731,6 +765,28 @@ curl -s -i -X POST "$CLOUD/api/ingest/sessions/S2-9999/end" -H "X-API-Key: $KEY"
 curl -s "$CLOUD/api/admin/commissions?from=2026-09-01&to=2026-09-30" -H "X-Admin-Key: $ADMIN"
 ```
 
+เซสชันที่กดยืนยันแต่หาผู้ดูแลไม่เจอ (ต้องแก้)
+
+```bash
+curl -s "$CLOUD/api/admin/session-ends?unmatched=1" -H "X-Admin-Key: $ADMIN"
+```
+
+แก้ผู้ดูแลของเซสชัน id 123
+
+```bash
+curl -s -X PATCH "$CLOUD/api/admin/session-ends/123" -H "X-Admin-Key: $ADMIN" -H "Content-Type: application/json" -d '{"staff_id":1,"note":"แก้ตามที่แจ้ง"}'
+```
+
+ปิดยอดงวด แล้วบันทึกว่าจ่ายแล้ว
+
+```bash
+curl -s -X POST "$CLOUD/api/admin/commission-payouts" -H "X-Admin-Key: $ADMIN" -H "Content-Type: application/json" -d '{"staff_id":1,"from":"2026-09-01","to":"2026-09-15"}'
+```
+
+```bash
+curl -s -X PATCH "$CLOUD/api/admin/commission-payouts/1" -H "X-Admin-Key: $ADMIN" -H "Content-Type: application/json" -d '{"status":"paid","note":"โอนแล้ว"}'
+```
+
 ทดสอบฝั่ง Pi (ใน LAN)
 
 ```bash
@@ -739,12 +795,42 @@ curl -s http://7lnetwork-s2:8000/api/staff
 
 ---
 
-## 8. Checklist ฝั่งเซิร์ฟเวอร์
+## 8. Deploy + Checklist
 
-- [ ] เพิ่มตาราง `staff`, `session_ends` (+ `commission_payouts` ถ้าใช้) ใน `server/src/db.js`
-- [ ] `GET /api/ingest/staff` และ `POST /api/ingest/sessions/:code/end` ใน `server/src/routes/ingest.js`
-- [ ] Admin API หัวข้อ 5 ใน `server/src/routes/admin.js`
-- [ ] หน้าเว็บจัดการรายชื่อผู้ดูแล + รายงานค่าคอม (หน้าแอดมิน / `web/src/customer` / `server/public`)
-- [ ] เพิ่มผู้ดูแลในตาราง `staff` โดยใช้ **id ชุดเดียวกับ `staff.json` บน Pi** (ถ้าเคยใช้ไปแล้ว) หรือแก้รายการ `unmatched` ผ่าน `PATCH /api/admin/session-ends/:id`
-- [ ] Deploy แล้วดู log บน Pi: `journalctl -u gopro-kiosk -f | grep report` → ต้องเห็น `[report] ✅ ส่งรายงานจบเซสชัน ...`
-- [ ] รายงานที่ค้างในไฟล์ `.session/session_reports.jsonl` บน Pi จะทยอยส่งขึ้นเองภายใน 60 วินาที ไม่ต้องทำอะไรเพิ่ม
+ไม่มี dependency ใหม่ ไม่ต้องตั้งค่า `.env` เพิ่ม — ใช้ `API_KEY` / `ADMIN_KEY` / `DATABASE_URL` เดิม
+
+บนเซิร์ฟเวอร์ (ตาม `server/deploy.md`)
+
+```bash
+cd ~/Shooting_Range && git pull
+```
+
+```bash
+cd ~/Shooting_Range/v2/server && npm install --omit=dev
+```
+
+```bash
+sudo systemctl restart shot24 && sudo journalctl -u shot24 -n 30 --no-pager
+```
+
+ตารางใหม่ 3 ตารางถูกสร้างตอน restart (ไม่แตะข้อมูลเดิม) แล้วทดสอบทั้งระบบ
+
+```bash
+cd ~/Shooting_Range/v2/server && npm run selftest
+```
+
+**selftest ส่วนค่าคอม** เขียนข้อมูลลงตารางถาวรเล็กน้อยทุกครั้งที่รัน
+ผู้ดูแลชื่อ `SELFTEST (ทดสอบระบบ)` (ถูกปิด `active` ตอนจบ ไม่โผล่ใน dropdown), เซสชัน `S1-SELFTEST` แบบ skip (device `selftest`), งวดค่าคอมที่ถูก `void`
+
+Checklist
+
+- [x] ตาราง `staff`, `session_ends`, `commission_payouts` ใน `server/src/db.js`
+- [x] `GET /api/ingest/staff` และ `POST /api/ingest/sessions/:code/end`
+- [x] Admin API หัวข้อ 5
+- [x] selftest ครอบคลุม ingest + admin + กันซ้ำ + ล็อกงวด
+- [ ] Deploy + `npm run selftest` ผ่าน
+- [ ] เพิ่มผู้ดูแลจริงผ่าน `POST /api/admin/staff` (Pi ตอนนี้ไม่มี `staff.json` → ไม่ต้องจับคู่ id)
+- [ ] เปิด popup ที่จอเลน → dropdown ต้องขึ้นรายชื่อจากเซิร์ฟเวอร์ (`GET http://7lnetwork-s2:8000/api/staff` → `"source": "cloud"`)
+- [ ] ดู log บน Pi: `journalctl -u gopro-kiosk -f | grep report` → ต้องเห็น `[report] ✅ ส่งรายงานจบเซสชัน ...`
+- [ ] รายงานที่ค้างใน `.session/session_reports.jsonl` บน Pi (ตอนนี้ 1 รายการ) ทยอยส่งขึ้นเองภายใน 60 วินาที
+- [ ] หน้าเว็บจัดการรายชื่อผู้ดูแล + รายงานค่าคอม
