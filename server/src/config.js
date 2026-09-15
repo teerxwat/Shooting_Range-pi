@@ -15,7 +15,7 @@ export const config = {
   paygwKey: process.env.PAYGW_API_KEY || '',
   secret: process.env.JWT_SECRET || 'devsecret',
   retentionDays: Number(process.env.RETENTION_DAYS || 7),
-  price: Number(process.env.PRICE_PER_CLIP || 100),
+  price: Number(process.env.PRICE_PER_CLIP || 250),
   watermark: process.env.WATERMARK_TEXT || 'SHOOTING RANGE',
   ffmpeg: process.env.FFMPEG || 'ffmpeg',
   dataDir: path.resolve(ROOT, process.env.DATA_DIR || 'data'),

@@ -9,7 +9,7 @@ import CheckoutModal from '../components/CheckoutModal';
 import SaveVideo from '../components/SaveVideo';
 import { getCode, getConfig, getPurchases, getVideos, getPendingOrder, previewUrl } from '../api';
 
-const FALLBACK_PRICE = Number(import.meta.env.VITE_PRICE || 100);
+const FALLBACK_PRICE = Number(import.meta.env.VITE_PRICE || 250);
 
 // พรีวิวฟิลเตอร์บนเว็บ (CSS) — ให้ใกล้เคียงผลจริงจาก ffmpeg ฝั่ง server
 const FILTER_CSS = {
