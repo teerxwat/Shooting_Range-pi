@@ -65,6 +65,7 @@ const subText = { fontSize: 'clamp(18px, 2.4vw, 28px)', color: 'rgba(255,255,255
 // กล่องวิดีโอ Live View
 // fill = โหมดเต็มจอ (camera app): วิดีโอเป็น background layer, object-fit cover
 // state: IDLE (+preview สด) | PREPARING | DETECTING | COUNTDOWN | RECORDING | DOWNLOADING | DONE | ERROR
+// (DOWNLOADING/DONE ไม่มี overlay — วิดีโอบันทึก/แปลงเบื้องหลัง แสดงเป็นแถบเล็กใน LiveView)
 export default function VideoBox({ laneId, state, session, preview = false, fill = false }) {
   const { t } = useApp();
   const idleish = ['IDLE', 'DONE', 'ERROR'].includes(state);
@@ -95,21 +96,10 @@ export default function VideoBox({ laneId, state, session, preview = false, fill
 
   return (
     <div style={outerStyle}>
-      {/* MJPEG stream จาก server.py */}
-      {showStream ? (
-        <img
-          src={streamUrl(laneId)}
-          alt="live"
-          style={{
-            position: 'absolute',
-            inset: 0,
-            width: '100%',
-            height: '100%',
-            objectFit: fill ? 'cover' : 'contain',
-            background: '#111'
-          }}
-        />
-      ) : (
+      {/* คำอธิบาย/placeholder — โชว์ไว้ตลอดเวลาที่ไม่มีภาพจริง (รวมถึงตอน showStream=true
+          แต่กล้องยังไม่ส่งเฟรมแรกมา) กันไม่ให้จอมืดเปล่าเฉยๆ ระหว่างต่อสตรีม
+          ช่วงบันทึก/นับถอยหลังไม่ต้องโชว์ (มี overlay หรือแถบโหลดเล็กอยู่แล้ว) */}
+      {(showStream || idleish) && (
         <div
           style={{
             ...mono,
@@ -119,8 +109,25 @@ export default function VideoBox({ laneId, state, session, preview = false, fill
             padding: '20px'
           }}
         >
-          {t.camHint}
+          {showStream ? t.connectingCam : t.camHint}
         </div>
+      )}
+
+      {/* MJPEG stream จาก server.py — วางทับ hint ข้างบน พื้นหลังใส (ไม่ทึบดำ) จนกว่าจะมีเฟรมจริง
+          กันไม่ให้จอมืดสนิทระหว่างที่กล้องยังไม่ส่งภาพเข้ามา */}
+      {showStream && (
+        <img
+          src={streamUrl(laneId)}
+          alt="live"
+          style={{
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
+            objectFit: fill ? 'cover' : 'contain',
+            background: 'transparent'
+          }}
+        />
       )}
 
       {/* popup ใหญ่ "เตรียมท่ายิง!" ระหว่าง detect — อ่านได้จากระยะไกล */}
@@ -183,18 +190,7 @@ export default function VideoBox({ laneId, state, session, preview = false, fill
         </Overlay>
       )}
 
-      {state === 'DOWNLOADING' && (
-        <Overlay>
-          <BigSpinner />
-          <div style={bigTitle}>{t.downloading}</div>
-        </Overlay>
-      )}
-
-      {state === 'DONE' && (
-        <Overlay bg="rgba(24,24,26,.55)">
-          <div style={bigTitle}>✓ {t.doneMsg}</div>
-        </Overlay>
-      )}
+      {/* DOWNLOADING / DONE ไม่มี overlay เต็มจอแล้ว — แสดงเป็นแถบโหลดเล็กๆ (ProcessingPill) ใน LiveView แทน */}
 
       {state === 'ERROR' && (
         <Overlay bg="rgba(60,20,20,.72)">

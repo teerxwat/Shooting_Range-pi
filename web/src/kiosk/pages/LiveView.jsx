@@ -1,11 +1,13 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useApp } from '@/shared/AppContext';
 import { getStatus, startProcess, cancelProcess, startPreview, stopPreview, BUSY_STATES, SKIP_AI_ONLY } from '@/kiosk/api';
 import { usePoll } from '@/shared/hooks/usePoll';
 import { useOccupy } from '@/kiosk/useOccupy';
 import VideoBox from '@/kiosk/components/VideoBox';
+import ProcessingPill from '@/kiosk/components/ProcessingPill';
 import PinPad from '@/kiosk/components/PinPad';
+import EndSessionModal from '@/kiosk/components/EndSessionModal';
 import { Spinner } from '@/shared/components/buttons';
 
 const mono = { fontFamily: "'IBM Plex Mono', monospace" };
@@ -53,19 +55,8 @@ export default function LiveView() {
     };
   }, [laneId]);
 
-  // เมื่อบันทึกเสร็จ (DONE) → เปิดวิดีโอล่าสุดอัตโนมัติ "ครั้งเดียวต่อรอบอัด"
-  // (visit เดียวอัดได้หลายรอบ → ผูก key กับจำนวนคลิปด้วย ให้เด้งทุกรอบใหม่)
-  useEffect(() => {
-    if (state !== 'DONE' || !session?.code || clipCount === 0) return;
-    const key = `done-navigated-${session.code}-${clipCount}`;
-    if (sessionStorage.getItem(key)) return;
-    sessionStorage.setItem(key, '1');
-    const timer = setTimeout(
-      () => navigate(`/lane/${laneId}/clips/${Math.max(0, clipCount - 1)}`),
-      1200
-    );
-    return () => clearTimeout(timer);
-  }, [state, session, clipCount, laneId, navigate]);
+  // คลิปแปลงไฟล์เบื้องหลังเสร็จ → ไม่เด้งไปหน้าดูวิดีโอ ให้อยู่หน้าเดิม
+  // ลูกค้าเห็นว่าพร้อมจากแถบโหลดที่หายไป + ตัวเลขบนปุ่ม "วิดีโอย้อนหลัง" ที่นับเพิ่ม แล้วกดดูเองได้
 
   // skipDetect=true → ปุ่มหลัก "เริ่มบันทึกทันที" (ข้าม AI)
   // skipDetect=false → ปุ่มรอง "ตรวจจับท่า AI" (ซ่อนได้ด้วย VITE_SKIP_AI_ONLY=true)
@@ -76,6 +67,10 @@ export default function LiveView() {
       alert(e.message);
     }
   };
+
+  // ปุ่ม "จบการใช้งาน" → popup เลือกผู้ดูแล (ค่าคอมมิชชั่น) แล้วจบเซสชันทันที ไม่ต้องรอ heartbeat หมดอายุ
+  // (เลนว่างให้คนต่อไปทันที + คนต่อไปไม่เห็นคลิปของคนก่อน)
+  const [endOpen, setEndOpen] = useState(false);
 
   return (
     <section
@@ -112,6 +107,15 @@ export default function LiveView() {
         <div style={{ ...frost, ...mono, cursor: 'default', fontSize: '13px', padding: '8px 14px' }}>
           {t.session}: {status?.sessionCode || session?.code || '—'}
         </div>
+
+        {!!status?.sessionCode && !busy && (
+          <button
+            onClick={() => setEndOpen(true)}
+            style={{ ...frost, minHeight: '46px', padding: '0 18px', fontSize: '14px', fontWeight: 600 }}
+          >
+            ⏹ {t.endSession}
+          </button>
+        )}
 
         <div style={{ flex: 1 }} />
 
@@ -191,6 +195,13 @@ export default function LiveView() {
             minHeight: '72px'
           }}
         >
+          {/* แถบโหลดเล็กๆ เหนือปุ่มวิดีโอย้อนหลัง — บันทึก/แปลงวิดีโอเบื้องหลัง ไม่บังภาพสด */}
+          <ProcessingPill
+            saving={state === 'DOWNLOADING'}
+            processing={status?.processing}
+            style={{ position: 'absolute', left: 0, bottom: 'calc(100% + 12px)', width: '270px' }}
+          />
+
           {/* วิดีโอย้อนหลัง — ชิดซ้าย */}
           <button
             onClick={() => clipCount && navigate(`/lane/${laneId}/clips`)}
@@ -263,6 +274,14 @@ export default function LiveView() {
 
       {/* ตั้ง PIN ก่อนเริ่มใช้เลน — สถานะจะอัปเดตเองจาก poll ทุก 1 วิ */}
       <PinPad lane={laneId} open={needsPin} onDone={() => {}} />
+
+      <EndSessionModal
+        open={endOpen}
+        laneId={laneId}
+        sessionCode={status?.sessionCode}
+        onClose={() => setEndOpen(false)}
+        onEnded={() => navigate('/')}
+      />
     </section>
   );
 }

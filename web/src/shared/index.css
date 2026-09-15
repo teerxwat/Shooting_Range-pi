@@ -41,6 +41,16 @@ input[type='range'] {
   }
 }
 
+/* แถบโหลดแบบไม่รู้ % (วิ่งซ้ายไปขวา) */
+@keyframes indeterminate {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(290%);
+  }
+}
+
 /* hover interactions (prototype: style-hover) */
 .lane-card {
   transition: transform 0.12s, box-shadow 0.12s;

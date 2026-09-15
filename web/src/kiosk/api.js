@@ -34,6 +34,16 @@ export const cancelProcess = (ch) => req(`/api/channels/${ch}/cancel`, { method:
 export const startPreview = (ch) => req(`/api/channels/${ch}/preview/start`, { method: 'POST' });
 export const stopPreview = (ch) => req(`/api/channels/${ch}/preview/stop`, { method: 'POST' });
 export const occupyLane = (ch) => req(`/api/channels/${ch}/occupy`, { method: 'POST' });
+// จบเซสชันปัจจุบันทันที (popup "จบการใช้งาน") — เลนนี้พร้อมให้ลูกค้าคนต่อไปเข้าใช้เป็นเซสชันใหม่
+// body: { action: 'confirm', staff_id } = ระบุผู้ดูแลที่ได้ค่าคอมมิชชั่น | { action: 'skip' } = ไม่ระบุ
+export const endSession = (ch, body = { action: 'skip' }) =>
+  req(`/api/channels/${ch}/end`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+// รายชื่อผู้ดูแล (dropdown ใน popup จบการใช้งาน) → { source, staff: [{ id, name }] }
+export const getStaff = () => req('/api/staff');
 
 // ลูกค้าตั้ง PIN 4 หลักก่อนเริ่มใช้เลน → ระบบลงทะเบียนเซสชันบนคลาวด์ให้ทันที
 export const setLanePin = (ch, pin) =>

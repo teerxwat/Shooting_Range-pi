@@ -7,6 +7,7 @@ export const I18N = {
     enterHint: 'แตะเพื่อเลือกช่องนี้', staffNote: 'พนักงานจะเป็นผู้เริ่มเซสชันให้ท่าน',
     backLanes: 'หน้ารวมช่องยิง', back: 'ย้อนกลับ', session: 'เซสชัน', live: 'ถ่ายทอดสด',
     camHint: 'ภาพสดจากกล้องประจำช่องจะแสดงที่นี่',
+    connectingCam: 'กำลังเชื่อมต่อกล้อง… รอสักครู่',
     waitStaff: 'รอพนักงานเริ่มเซสชัน', staffStart: 'เริ่มเซสชัน (สำหรับพนักงาน)',
     process: 'เริ่มทำงาน', processing: 'กำลังประมวลผล…',
     processSkip: 'เริ่มบันทึกทันที', processAi: 'ตรวจจับท่า AI',
@@ -15,6 +16,7 @@ export const I18N = {
     detectHint: 'ยืนท่าเล็งค้างไว้ 3 วินาที ระบบจะเริ่มนับถอยหลังอัตโนมัติ',
     recording: 'กำลังบันทึก', downloading: 'กำลังดาวน์โหลดวิดีโอจากกล้อง…',
     doneMsg: 'บันทึกเสร็จแล้ว! กำลังเปิดวิดีโอ…', countdownMsg: 'เตรียมตัว! เริ่มบันทึกใน',
+    savingVideo: 'กำลังบันทึกวิดีโอ…', preparingVideo: 'กำลังเตรียมวิดีโอ',
     latestVideo: 'ดูวิดีโอล่าสุด', download: 'ดาวน์โหลดวิดีโอ', close: 'ปิด', speed: 'ความเร็ว',
     filterLabel: 'ฟิลเตอร์', fOriginal: 'ต้นฉบับ', fCinema: 'โทนหนัง', fMono: 'ขาวดำ',
     rendering: 'กำลังเตรียมวิดีโอของคุณ…',
@@ -59,7 +61,12 @@ export const I18N = {
     verifying: 'กำลังตรวจสอบการชำระเงิน…', verifyHint: 'กรุณารอสักครู่ ระบบกำลังยืนยันยอดโอน',
     paySuccess: 'ชำระเงินสำเร็จ', scanDownload: 'สแกน QR นี้เพื่อดาวน์โหลดวิดีโอลงมือถือของคุณ',
     finish: 'เสร็จสิ้น · กลับสู่หน้าช่องยิง', free: 'ช่องว่าง', baht: 'บาท', perClip: '/ คลิป',
-    light: 'โหมดสว่าง', dark: 'โหมดมืด'
+    light: 'โหมดสว่าง', dark: 'โหมดมืด',
+    endSession: 'จบการใช้งาน',
+    endHelp: 'เลือกผู้ดูแลของเซสชันนี้ เพื่อบันทึกค่าคอมมิชชั่น',
+    staffLabel: 'ผู้ดูแล', staffPlaceholder: '— เลือกผู้ดูแล —', staffLoading: 'กำลังโหลดรายชื่อ…',
+    staffEmpty: 'ยังไม่มีรายชื่อผู้ดูแล — กด "ข้าม" เพื่อจบเซสชัน',
+    skip: 'ข้าม', endingSession: 'กำลังจบเซสชัน…'
   },
   en: {
     appName: '700 Years Shooting Range', subtitle: 'Lane display system',
@@ -69,6 +76,7 @@ export const I18N = {
     enterHint: 'Tap to select this lane', staffNote: 'A staff member will start your session',
     backLanes: 'All lanes', back: 'Back', session: 'Session', live: 'LIVE',
     camHint: 'Live camera feed for this lane appears here',
+    connectingCam: 'Connecting to camera… one moment',
     waitStaff: 'Waiting for staff to start the session', staffStart: 'Start session (staff only)',
     process: 'Start', processing: 'Processing…',
     processSkip: 'Start recording', processAi: 'AI detect',
@@ -77,6 +85,7 @@ export const I18N = {
     detectHint: 'Hold your aiming pose for 3 seconds — countdown starts automatically',
     recording: 'Recording', downloading: 'Downloading video from camera…',
     doneMsg: 'Done! Opening your video…', countdownMsg: 'Get ready! Recording in',
+    savingVideo: 'Saving video…', preparingVideo: 'Preparing video',
     latestVideo: 'View latest video', download: 'Download video', close: 'Close', speed: 'Speed',
     filterLabel: 'Filter', fOriginal: 'Original', fCinema: 'Cinema', fMono: 'B&W',
     rendering: 'Preparing your video…',
@@ -118,7 +127,12 @@ export const I18N = {
     verifying: 'Verifying payment…', verifyHint: 'Please wait while we confirm your transfer',
     paySuccess: 'Payment successful', scanDownload: 'Scan this QR to download the video to your phone',
     finish: 'Done · back to lane', free: 'available', baht: 'THB', perClip: '/ clip',
-    light: 'Light mode', dark: 'Dark mode'
+    light: 'Light mode', dark: 'Dark mode',
+    endSession: 'End session',
+    endHelp: 'Select the staff member for this session to record their commission.',
+    staffLabel: 'Staff', staffPlaceholder: '— Select staff —', staffLoading: 'Loading staff…',
+    staffEmpty: 'No staff list yet — tap "Skip" to end the session',
+    skip: 'Skip', endingSession: 'Ending session…'
   },
   zh: {
     appName: '700年射击场', subtitle: '射击道显示系统',
@@ -128,6 +142,7 @@ export const I18N = {
     enterHint: '点击选择此射击道', staffNote: '工作人员将为您开始会话',
     backLanes: '全部射击道', back: '返回', session: '会话', live: '直播',
     camHint: '此射击道的实时摄像画面将显示在这里',
+    connectingCam: '正在连接摄像头…请稍候',
     waitStaff: '等待工作人员开始会话', staffStart: '开始会话（仅限工作人员）',
     process: '开始工作', processing: '处理中…',
     processSkip: '立即开始录制', processAi: 'AI 姿势检测',
@@ -136,6 +151,7 @@ export const I18N = {
     detectHint: '保持瞄准姿势3秒，系统将自动开始倒计时',
     recording: '录制中', downloading: '正在从相机下载视频…',
     doneMsg: '录制完成！正在打开视频…', countdownMsg: '准备！开始录制',
+    savingVideo: '正在保存视频…', preparingVideo: '正在准备视频',
     latestVideo: '查看最新视频', download: '下载视频', close: '关闭', speed: '速度',
     filterLabel: '滤镜', fOriginal: '原片', fCinema: '电影感', fMono: '黑白',
     rendering: '正在生成视频…',
@@ -177,6 +193,11 @@ export const I18N = {
     verifying: '正在核实付款…', verifyHint: '请稍候，系统正在确认转账',
     paySuccess: '付款成功', scanDownload: '扫描此二维码将视频下载到您的手机',
     finish: '完成 · 返回射击道', free: '空闲', baht: '泰铢', perClip: '/ 段',
-    light: '浅色模式', dark: '深色模式'
+    light: '浅色模式', dark: '深色模式',
+    endSession: '结束使用',
+    endHelp: '请选择本场次的负责人，以记录佣金。',
+    staffLabel: '负责人', staffPlaceholder: '— 选择负责人 —', staffLoading: '正在加载名单…',
+    staffEmpty: '暂无负责人名单 — 点击"跳过"结束会话',
+    skip: '跳过', endingSession: '正在结束…'
   }
 };
