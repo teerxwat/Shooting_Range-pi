@@ -63,6 +63,15 @@ BUSY_STATES = ("PREPARING", "DETECTING", "COUNTDOWN", "RECORDING", "DOWNLOADING"
 # idle preview: ภาพสดตอนเข้าหน้าช่อง (ก่อนกดประมวลผล)
 PREVIEW_IDLE_TIMEOUT = 15.0   # ไม่มี heartbeat จากหน้าเว็บนานเท่านี้ → หยุด stream เอง
 
+# เซสชันของลูกค้า 1 คน (visit) จบเองเมื่อเงียบนานเกินค่านี้ — เป็นแค่ตาข่ายกันลืมกดปุ่ม
+# วิธีจบปกติคือพนักงานกดปุ่ม "จบการใช้งาน" ที่จอ
+#
+# ห้ามใช้ OCCUPY_TTL (15 วิ) มาตัดสินว่า "ลูกค้าไปแล้ว": จอแท็บเล็ตดับหรือสลับแอปเมื่อไร
+# เบราว์เซอร์จะบีบ setInterval ของหน้าเว็บเหลือ ~1 ครั้ง/นาที (background throttling)
+# → heartbeat ห่าง 60 วิ > 15 วิ ทำให้เซสชันถูกตัดทิ้งทุกนาทีทั้งที่ลูกค้ายังยิงอยู่
+# (เคยเกิดจริง: 19:44-20:00 เซสชันวิ่งจาก S1-0029 ถึง S1-0039 เพราะจอดับ)
+VISIT_TTL = float(os.getenv("VISIT_TTL_MINUTES") or 60) * 60
+
 
 def stream_port(ch: int) -> int:
     """พอร์ต UDP รับ stream แยกต่อช่อง (ch1→8554, ch2→8555, …) → เปิดหลายช่องพร้อมกันได้"""
@@ -876,17 +885,30 @@ class LaneManager:
 
     # ── occupancy (มีคนเปิดหน้าช่องนี้อยู่ไหม) ────────────────────────────────
 
-    OCCUPY_TTL = 15.0   # ไม่มี heartbeat นานเท่านี้ = ถือว่าออกจากช่องแล้ว (ระบบเคลียร์เอง)
+    OCCUPY_TTL = 15.0   # ไม่มี heartbeat นานเท่านี้ = ไม่มีใครเปิดหน้าช่องนี้อยู่ (คุมภาพสด/ป้าย occupied)
+
+    def visit_expired(self, ch: int) -> bool:
+        """
+        visit ของช่องนี้หมดอายุหรือยัง — นับจาก heartbeat ครั้งล่าสุดเทียบกับ VISIT_TTL
+        (ไม่ใช่ OCCUPY_TTL ซึ่งสั้นกว่า throttle ของเบราว์เซอร์ตอนจอดับ)
+        อ่านอย่างเดียว ไม่แก้ state → เรียกจากเธรด cleaner ได้ปลอดภัย
+        """
+        v = self.visits.get(ch)
+        if not v:
+            return False
+        if self.is_occupied(ch):
+            return False          # ยังมีคนเปิดหน้าช่องอยู่ / กำลังอัด → ยังไม่หมดอายุแน่นอน
+        return time.time() - v.get("seen", v["started"]) > VISIT_TTL
 
     def current_visit(self, ch: int, create: bool = False):
         """
         คืน visit (เซสชันของลูกค้าคนปัจจุบัน) ของช่องนี้
-        - ถ้าลูกค้าคนก่อนออกไปแล้ว (ไม่ occupied) → ปิด visit เดิมทิ้ง
+        - visit เงียบเกิน VISIT_TTL (ไม่ได้กดปุ่มจบ) → ปิด visit เดิมทิ้ง
         - create=True → เปิด visit ใหม่พร้อมรันเลขเซสชันใหม่
         """
         v = self.visits.get(ch)
-        if v and not self.is_occupied(ch):
-            print(f"  [ch{ch}] จบเซสชัน {v['code']} (ผู้ใช้ออกจากช่อง)")
+        if v and self.visit_expired(ch):
+            print(f"  [ch{ch}] จบเซสชัน {v['code']} (เงียบเกิน {VISIT_TTL / 60:.0f} นาที — ไม่ได้กดปุ่มจบ)")
             self.visits[ch] = None
             v = None
             # เคลียร์ WebSession เก่า (state DONE/ERROR ค้างอยู่) ไปด้วย — ไม่งั้นตอนสถานะ
@@ -895,7 +917,8 @@ class LaneManager:
             self.sessions.pop(ch, None)
             cleaner.wake()   # เซสชันจบ → ลบคลิปที่อัปขึ้นคลาวด์แล้วของเซสชันนี้ออกจากเครื่อง
         if v is None and create:
-            v = {"code": next_session_code(ch), "started": time.time(), "pin": None}
+            now = time.time()
+            v = {"code": next_session_code(ch), "started": now, "pin": None, "seen": now}
             self.visits[ch] = v
             print(f"  [ch{ch}] เริ่มเซสชันใหม่ {v['code']}")
         return v
@@ -964,9 +987,11 @@ class LaneManager:
         if ch in self.channels:
             # เช็ค visit เก่าหมดอายุก่อนต่ออายุ occupancy (ลำดับสำคัญ)
             v = self.current_visit(ch)
-            self.occupied_until[ch] = time.time() + self.OCCUPY_TTL
+            now = time.time()
+            self.occupied_until[ch] = now + self.OCCUPY_TTL
             if v is None:
-                self.current_visit(ch, create=True)
+                v = self.current_visit(ch, create=True)
+            v["seen"] = now   # heartbeat ล่าสุด — ใช้ตัดสินหมดอายุด้วย VISIT_TTL
 
     def is_occupied(self, ch: int) -> bool:
         sess = self.sessions.get(ch)
@@ -1074,9 +1099,9 @@ processor.recover(manager.channels)
 
 
 def _session_active(ch, code) -> bool:
-    """เซสชันนี้ยังใช้งานอยู่ที่เลนไหม (ยังเป็นลูกค้าคนปัจจุบัน และยังอยู่หน้าช่อง)"""
+    """เซสชันนี้ยังใช้งานอยู่ที่เลนไหม (ยังเป็นลูกค้าคนปัจจุบัน และยังไม่หมดอายุ)"""
     v = manager.visits.get(ch)
-    return bool(v and v.get("code") == code and manager.is_occupied(ch))
+    return bool(v and v.get("code") == code and not manager.visit_expired(ch))
 
 
 cleaner.start(_session_active)
