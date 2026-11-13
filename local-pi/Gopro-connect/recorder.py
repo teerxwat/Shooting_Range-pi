@@ -58,6 +58,11 @@ def _prep_cam(cam, log=print):
     if not cam.wait_ready(timeout=6):
         log(f"  [!] {cam.name}: กล้องยัง busy หลังโหลด preset")
 
+    # ซูมที่ลูกค้าตั้งจากหน้าเว็บ — ตั้งซ้ำหลัง load_preset (เปลี่ยน preset อาจรีเซ็ตซูมเป็น 0)
+    if cam.zoom:
+        if not cam.set_digital_zoom(cam.zoom):
+            log(f"  [!] {cam.name}: ตั้งซูม {cam.zoom}% ซ้ำหลังโหลด preset ไม่สำเร็จ")
+
 
 def _cam_state_summary(cam) -> dict:
     """อ่าน state กล้อง คืน dict สรุป"""

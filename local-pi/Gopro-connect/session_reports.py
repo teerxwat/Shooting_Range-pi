@@ -69,7 +69,11 @@ def _write_json(path, data):
 # ── รายชื่อผู้ดูแล ───────────────────────────────────────────────────────
 
 def _normalize_staff(data) -> list[dict]:
-    """รับได้ทั้ง [...] และ {"staff": [...]} — คืน [{"id": "3", "name": "สมชาย"}] เฉพาะคนที่ active"""
+    """
+    รับได้ทั้ง [...] และ {"staff": [...]} — คืนเฉพาะคนที่ active
+    [{"id": "3", "name": "สมชาย", "code": "EMP01", "label": "EMP01 · สมชาย"}]
+    (code/label มีเฉพาะเมื่อเซิร์ฟเวอร์ส่งมา — หน้าจอใช้ label แสดงใน dropdown)
+    """
     items = data.get("staff") if isinstance(data, dict) else data
     out = []
     for s in items or []:
@@ -79,7 +83,12 @@ def _normalize_staff(data) -> list[dict]:
         name = str(s.get("name") or "").strip()
         if sid in (None, "") or not name:
             continue
-        out.append({"id": str(sid), "name": name})
+        row = {"id": str(sid), "name": name}
+        code = str(s.get("code") or "").strip()
+        if code:
+            row["code"] = code
+            row["label"] = str(s.get("label") or "").strip() or f"{code} · {name}"
+        out.append(row)
     return out
 
 

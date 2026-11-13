@@ -139,6 +139,24 @@ class GoProCamera:
         return self._get(f"/gopro/camera/setting?setting={setting_id}&option={option}",
                          timeout=4, retries=1) is not None
 
+    # ---- digital zoom (0 = กว้างสุด, 100 = ซูมสุด) ----
+    # zoom = ค่าที่ตั้งจากหน้าเว็บล่าสุด (None = ยังไม่เคยตั้ง) — recorder ใช้ตั้งซ้ำหลัง load_preset
+    # เพราะการเปลี่ยน preset อาจรีเซ็ตซูมของกล้องกลับเป็น 0
+    zoom: int | None = None
+
+    def set_digital_zoom(self, percent):
+        percent = max(0, min(100, int(percent)))
+        ok = self._get(f"/gopro/camera/digital_zoom?percent={percent}",
+                       timeout=3, retries=1) is not None
+        if ok:
+            self.zoom = percent
+        return ok
+
+    def get_digital_zoom(self):
+        """อ่านค่าซูมปัจจุบันจากกล้อง (status 75) — None ถ้าอ่านไม่ได้"""
+        z = self._status().get("75")
+        return int(z) if isinstance(z, (int, float)) else None
+
     def start_recording(self, attempts=3):
         """
         รอกล้องว่างก่อนกด shutter + ลองใหม่เมื่อกล้องตอบ error (เดิม retry เฉพาะตอนต่อไม่ติด)

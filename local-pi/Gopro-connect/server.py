@@ -788,6 +788,9 @@ class LaneManager:
         self.starting: set[int] = set()
         # keep_alive พลาดติดกันกี่ครั้ง — พลาดครั้งเดียวยังไม่ถือว่าออฟไลน์
         self._offline_hits: dict[int, int] = {}
+        # digital zoom: ค่าล่าสุดที่รอส่งให้กล้อง + worker ที่กำลังส่ง (ต่อช่อง)
+        self._zoom_pending: dict[int, int] = {}
+        self._zoom_workers: dict[int, threading.Thread] = {}
         self._lock = threading.Lock()
 
         for ch_cfg in config.load_channels():
@@ -880,6 +883,60 @@ class LaneManager:
             w.stop()
             if wait:
                 w.join(timeout=5)
+
+    # ── digital zoom (slider บนหน้า Live View) ──────────────────────────────
+    # ซูมเฉพาะกล้องตัวที่โชว์ภาพสด (กล้องตัวแรกของช่อง)
+    # ลาก slider = ยิงค่ามาถี่ๆ → เก็บแค่ค่าล่าสุด แล้วมี worker ตัวเดียวต่อช่องส่งให้กล้อง
+    # (กล้องไม่ต้องรับคำสั่งซ้อนกัน และค่าสุดท้ายที่ปล่อยนิ้วจะถึงกล้องเสมอ)
+
+    # ช่วงที่ห้ามซูม — กำลังเตรียม/โหลด preset/อัด/โหลดไฟล์จากกล้อง
+    ZOOM_LOCKED_STATES = ("PREPARING", "COUNTDOWN", "RECORDING", "DOWNLOADING")
+
+    def _zoom_cam(self, ch: int):
+        channel = self.channels.get(ch)
+        if channel is None:
+            raise HTTPException(404, f"ไม่พบช่อง {ch}")
+        cams = channel.active_cameras
+        if not cams:
+            raise HTTPException(409, "ช่องนี้ไม่มีกล้องที่เปิดใช้งาน")
+        return cams[0]
+
+    def get_zoom(self, ch: int) -> dict:
+        cam = self._zoom_cam(ch)
+        z = cam.get_digital_zoom()
+        if z is not None and ch not in self._zoom_pending:
+            cam.zoom = z
+        return {"ok": True, "zoom": cam.zoom if cam.zoom is not None else (z or 0),
+                "live": z is not None}
+
+    def set_zoom(self, ch: int, percent) -> dict:
+        try:
+            percent = max(0, min(100, int(round(float(percent)))))
+        except (TypeError, ValueError):
+            raise HTTPException(400, "percent ต้องเป็นตัวเลข 0-100")
+        cam = self._zoom_cam(ch)
+        sess = self.sessions.get(ch)
+        if ch in self.starting or (sess and sess.is_busy() and sess.state in self.ZOOM_LOCKED_STATES):
+            raise HTTPException(409, "กำลังบันทึก — ปรับซูมไม่ได้ในตอนนี้")
+        with self._lock:
+            self._zoom_pending[ch] = percent
+            w = self._zoom_workers.get(ch)
+            if not (w and w.is_alive()):
+                w = threading.Thread(target=self._zoom_worker, args=(ch, cam),
+                                     daemon=True, name=f"zoom-ch{ch}")
+                self._zoom_workers[ch] = w
+                w.start()
+        return {"ok": True, "zoom": percent}
+
+    def _zoom_worker(self, ch: int, cam):
+        while True:
+            with self._lock:
+                percent = self._zoom_pending.pop(ch, None)
+                if percent is None:
+                    self._zoom_workers.pop(ch, None)
+                    return
+            if not cam.set_digital_zoom(percent):
+                print(f"  [ch{ch}] ตั้งซูม {percent}% ไม่สำเร็จ")
 
     # ── actions ──────────────────────────────────────────────────────────────
 
@@ -1196,6 +1253,18 @@ def preview_start(ch: int):
 def preview_stop(ch: int):
     manager.stop_preview(ch)
     return {"ok": True}
+
+
+@app.get("/api/channels/{ch}/zoom")
+def zoom_get(ch: int):
+    """ค่าซูมปัจจุบันของกล้องที่โชว์ภาพสด → {zoom: 0-100}"""
+    return manager.get_zoom(ch)
+
+
+@app.post("/api/channels/{ch}/zoom")
+def zoom_set(ch: int, body: dict):
+    """slider ซูมบนหน้า Live View — body: {"percent": 0-100} (0 = กว้างสุด)"""
+    return manager.set_zoom(ch, (body or {}).get("percent"))
 
 
 @app.post("/api/channels/{ch}/cancel")
