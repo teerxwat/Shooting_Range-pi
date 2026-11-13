@@ -50,6 +50,8 @@ app.use('/api/admin', admin);
  */
 const publicDir = new URL('../public/', import.meta.url).pathname;
 app.get('/staff', (_req, res) => res.sendFile(`${publicDir}staff.html`));
+// หน้าแอดมิน: พนักงาน (รหัส/เรทค่าคอม) · เซสชันที่จบ · สรุป/ปิดยอดค่าคอม — HTML ไฟล์เดียวเหมือนกัน
+app.get(['/login', '/admin'], (_req, res) => res.sendFile(`${publicDir}admin.html`));
 
 // ถ้า build เว็บลูกค้าไว้แล้ว (npm run build:customer) จะเสิร์ฟจากพอร์ตเดียวกันเลย
 if (fs.existsSync(config.webDist)) {

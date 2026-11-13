@@ -13,8 +13,10 @@ import { startRender } from '../render.js';
 import { config } from '../config.js';
 import {
   ACTIONS, PAYOUT_STATUSES, REVENUE_JOIN, COMMISSION_EXPR,
-  periodRange, validateStaff, percentTooHigh, staffOut, parseJsonCol, round2,
+  periodRange, validateStaff, percentTooHigh, staffOut, parseJsonCol, round2, autoStaffCode,
 } from '../staff.js';
+
+const DUP_CODE = { error: 'รหัสพนักงานนี้มีคนใช้แล้ว — ใช้รหัสอื่น' };
 
 export const admin = express.Router();
 
@@ -357,7 +359,7 @@ admin.get('/staff', async (req, res, next) => {
   try {
     const rows = await all(
       `SELECT * FROM staff ${isTrue(req.query.active) ? 'WHERE active = 1' : ''}
-       ORDER BY active DESC, name`
+       ORDER BY active DESC, code, name`
     );
     res.json({ items: rows.map(staffOut) });
   } catch (e) { next(e); }
@@ -375,9 +377,24 @@ admin.post('/staff', async (req, res, next) => {
       `INSERT INTO staff (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`,
       cols.map((c) => values[c])
     );
-    logEvent('staff.created', { meta: { staff_id: id, ...values } });
-    res.status(201).json({ ok: true, id });
-  } catch (e) { next(e); }
+    // ไม่ได้ระบุรหัส → ตั้งให้อัตโนมัติจาก id (EMP01, EMP02, …)
+    let code = values.code;
+    if (!code) {
+      code = autoStaffCode(id);
+      try {
+        await q('UPDATE staff SET code = ? WHERE id = ?', [code, id]);
+      } catch (e) {
+        if (e.errno !== 1062) throw e;
+        code = `${code}-${id}`;   // EMPxx ถูกตั้งเองไปแล้ว → ต่อท้าย id ให้ไม่ซ้ำ
+        await q('UPDATE staff SET code = ? WHERE id = ?', [code, id]);
+      }
+    }
+    logEvent('staff.created', { meta: { staff_id: id, ...values, code } });
+    res.status(201).json({ ok: true, id, code });
+  } catch (e) {
+    if (e.errno === 1062) return res.status(409).json(DUP_CODE);
+    next(e);
+  }
 });
 
 admin.patch('/staff/:id', async (req, res, next) => {
@@ -390,6 +407,7 @@ admin.patch('/staff/:id', async (req, res, next) => {
     if (error) return res.status(400).json({ error });
     const cols = Object.keys(values);
     if (!cols.length) return res.status(400).json({ error: 'ไม่มี field ที่จะแก้' });
+    if (has(values, 'code') && !values.code) values.code = autoStaffCode(id);   // ลบรหัส = กลับเป็นรหัสอัตโนมัติ
     if (percentTooHigh(values.commission_type ?? cur.commission_type,
                        values.commission_value ?? cur.commission_value)) {
       return res.status(400).json({ error: 'commission_value แบบ percent ต้องไม่เกิน 100' });
@@ -401,7 +419,10 @@ admin.patch('/staff/:id', async (req, res, next) => {
     );
     logEvent('staff.updated', { meta: { staff_id: id, changes: values } });
     res.json({ ok: true });
-  } catch (e) { next(e); }
+  } catch (e) {
+    if (e.errno === 1062) return res.status(409).json(DUP_CODE);
+    next(e);
+  }
 });
 
 // ── 5.2 รายการเซสชันที่จบแล้ว ──────────────────────────────────────
@@ -433,9 +454,11 @@ admin.get('/session-ends', async (req, res, next) => {
     const rows = await all(
       `SELECT se.id, se.report_id, se.session_code, se.lane, se.channel, se.device,
               se.started_at, se.ended_at, se.duration_s, se.clip_count, se.action,
-              se.staff_id, se.staff_name, se.staff_matched, se.rate_type, se.rate_value, se.received_at,
+              se.staff_id, se.staff_name, st.code AS staff_code,
+              se.staff_matched, se.rate_type, se.rate_value, se.received_at,
               COALESCE(p.revenue, 0) AS revenue, ${COMMISSION_EXPR} AS commission
        FROM session_ends se ${REVENUE_JOIN}
+       LEFT JOIN staff st ON st.id = se.staff_id
        WHERE ${W}
        ORDER BY se.ended_at DESC LIMIT ? OFFSET ?`,
       [...params, limit, offset]
@@ -542,6 +565,7 @@ admin.get('/commissions', async (req, res, next) => {
     const rows = await all(
       `SELECT se.staff_id,
               COALESCE(MAX(st.name), MAX(se.staff_name)) AS staff_name,
+              MAX(st.code)                               AS staff_code,
               COUNT(*)                                   AS sessions,
               COALESCE(SUM(se.clip_count), 0)            AS clips,
               COALESCE(SUM(p.revenue), 0)                AS revenue,
@@ -578,7 +602,7 @@ admin.get('/commissions', async (req, res, next) => {
         const commission = round2(r.commission);
         const paidOut = round2(paidMap.get(num(r.staff_id)) || 0);
         return {
-          staff_id: num(r.staff_id), staff_name: r.staff_name,
+          staff_id: num(r.staff_id), staff_name: r.staff_name, staff_code: r.staff_code ?? null,
           sessions: num(r.sessions), clips: num(r.clips), revenue: num(r.revenue),
           commission, paid_out: paidOut, outstanding: round2(commission - paidOut),
         };

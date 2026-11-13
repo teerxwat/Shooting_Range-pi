@@ -2,7 +2,7 @@
 <html lang="th">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>ปลดล็อควิดีโอ — พนักงาน</title>
 <style>
   :root { color-scheme: light dark; --bg:#f6f6f7; --card:#fff; --line:#e2e2e6; --muted:#6b6b73; --accent:#c8102e; }
@@ -28,6 +28,14 @@
   .ok { color:#1a7f37; font-size:13px; margin-top:8px; }
   .err { color:var(--accent); font-size:13px; margin-top:8px; }
   .bar { display:flex; gap:8px; margin-bottom:14px; }
+  /* จอสัมผัส: ช่องกรอก ≥16px ไม่งั้น iPhone ซูมหน้าเว็บตอนแตะ */
+  @media (pointer: coarse) { input { font-size:16px; } button { min-height:46px; } }
+  /* มือถือ: ข้อมูลออเดอร์บน ปุ่มปลดล็อคเต็มแถวล่าง (เดิมปุ่มเบียดข้อความจนตกบรรทัด) */
+  @media (max-width: 520px) {
+    body { padding:14px max(14px, env(safe-area-inset-right)) 24px max(14px, env(safe-area-inset-left)); }
+    .row { flex-direction:column; align-items:stretch; }
+    .row > button { width:100%; }
+  }
 </style>
 </head>
 <body>

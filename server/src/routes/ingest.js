@@ -8,7 +8,7 @@ import { q, one, all, insert, logEvent } from '../db.js';
 import { config, DIRS, masterPath, previewPath } from '../config.js';
 import { requireApiKey } from '../auth.js';
 import { makePreview } from '../media.js';
-import { ACTIONS, isoToDate, laneAllowed } from '../staff.js';
+import { ACTIONS, isoToDate, laneAllowed, staffLabel } from '../staff.js';
 
 export const ingest = express.Router();
 ingest.use(requireApiKey);
@@ -95,17 +95,20 @@ ingest.post('/videos', upload.single('file'), async (req, res, next) => {
 
 /**
  * รายชื่อผู้ดูแลสำหรับ dropdown ใน popup "จบการใช้งาน" ที่จอเลน
- * GET /api/ingest/staff?lane=2 → { staff: [{ id, name, active }] }
+ * GET /api/ingest/staff?lane=2 → { staff: [{ id, code, name, label, active }] }
+ * label = "EMP01 · สมชาย" — จอเลนแสดงตามนี้ใน dropdown
  * Pi รอได้ 3 วิ — query นี้ต้องเบา
  */
 ingest.get('/staff', async (req, res, next) => {
   try {
     const lane = Number(req.query.lane) || null;
-    const rows = await all('SELECT id, name, lanes FROM staff WHERE active = 1 ORDER BY name');
+    const rows = await all('SELECT id, code, name, lanes FROM staff WHERE active = 1 ORDER BY code, name');
     res.json({
       staff: rows
         .filter((s) => laneAllowed(s.lanes, lane))
-        .map((s) => ({ id: Number(s.id), name: s.name, active: true })),
+        .map((s) => ({
+          id: Number(s.id), code: s.code ?? null, name: s.name, label: staffLabel(s), active: true,
+        })),
     });
   } catch (e) { next(e); }
 });

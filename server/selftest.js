@@ -101,6 +101,14 @@ for (const n of [1, 2]) {
   ok('ค่าคอม: dropdown ที่เลนกรองตามเลน',
     lane1.body.staff?.some((s) => s.id === staffId) && !lane2.body.staff?.some((s) => s.id === staffId),
     JSON.stringify({ lane1: lane1.body, lane2: lane2.body }));
+  const mineAtLane = lane1.body.staff?.find((s) => s.id === staffId);
+  ok('ค่าคอม: dropdown มีรหัส + label "รหัส · ชื่อ"',
+    !!mineAtLane?.code && mineAtLane.label === `${mineAtLane.code} · ${STAFF_NAME}`, JSON.stringify(mineAtLane));
+  const others = (await call('GET', '/api/admin/staff')).body.items?.filter((s) => s.id !== staffId) || [];
+  if (others.length) {
+    ok('ค่าคอม: ปฏิเสธรหัสพนักงานซ้ำ',
+      (await call('PATCH', `/api/admin/staff/${staffId}`, { code: others[0].code })).status === 409);
+  }
 
   const report = {
     report_id: crypto.randomUUID(), session_code: CODE, lane: 1, channel: 1, device: 'selftest',

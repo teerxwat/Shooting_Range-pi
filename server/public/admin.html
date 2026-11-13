@@ -1,0 +1,456 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>แอดมิน — Shooting Range</title>
+<style>
+  :root { color-scheme: light dark; --bg:#f6f6f7; --card:#fff; --line:#e2e2e6; --text:#18181b; --muted:#6b6b73;
+          --accent:#c8102e; --ok:#1a7f37; --warn:#b26a00; --chip:#f0f0f3; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#131316; --card:#1c1c20; --line:#2e2e34; --text:#ececef; --muted:#9a9aa3; --ok:#3fb950; --warn:#e3a23b; --chip:#26262c; }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family:-apple-system,"Segoe UI","Noto Sans Thai","IBM Plex Sans Thai",sans-serif; font-size:15px; }
+  .wrap { max-width:1080px; margin:0 auto; padding:16px max(16px, env(safe-area-inset-right)) 40px max(16px, env(safe-area-inset-left)); }
+  h1 { font-size:19px; margin:0; }
+  h2 { font-size:16px; margin:22px 0 10px; }
+  .muted { color:var(--muted); }
+  .mono { font-family:ui-monospace,"IBM Plex Mono","IBM Plex Sans Thai",monospace; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px 16px; margin-bottom:10px; }
+  input, select, button, textarea { font-family:inherit; font-size:15px; color:inherit; }
+  input, select, textarea { width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:10px; background:var(--bg); min-height:44px; }
+  /* จอสัมผัส: ช่องกรอก ≥16px ไม่งั้น iPhone ซูมหน้าเว็บตอนแตะ */
+  @media (pointer: coarse) { input, select, textarea { font-size:16px; } }
+  label { display:block; font-size:13px; font-weight:600; margin:10px 0 5px; }
+  button { padding:10px 16px; min-height:44px; border:none; border-radius:10px; background:var(--accent); color:#fff; font-weight:600; cursor:pointer; }
+  button.ghost { background:transparent; border:1px solid var(--line); color:var(--text); font-weight:500; }
+  button.small { min-height:36px; padding:6px 12px; font-size:14px; }
+  button:disabled { opacity:.5; cursor:default; }
+  .err { color:var(--accent); font-size:13.5px; margin-top:8px; min-height:1em; }
+  .ok { color:var(--ok); }
+
+  /* แถบบน — พอดีจอ 320px: ชื่อ + ปุ่มออก แถวแรก, แท็บเลื่อนแนวนอนแถวสอง */
+  .top { position:sticky; top:0; z-index:5; background:var(--bg); border-bottom:1px solid var(--line); padding-top:env(safe-area-inset-top); }
+  .top .row1 { display:flex; align-items:center; gap:10px; max-width:1080px; margin:0 auto; padding:10px 16px 6px; }
+  .tabs { display:flex; gap:4px; overflow-x:auto; scrollbar-width:none; max-width:1080px; margin:0 auto; padding:0 12px 8px; }
+  .tabs::-webkit-scrollbar { display:none; }
+  .tabs button { flex:0 0 auto; background:transparent; color:var(--muted); border-radius:99px; min-height:38px; padding:6px 14px; font-weight:600; }
+  .tabs button.on { background:var(--text); color:var(--bg); }
+
+  .bar { display:flex; flex-wrap:wrap; gap:8px; align-items:flex-end; margin-bottom:12px; }
+  .bar > * { flex:1 1 140px; }
+  .bar > button { flex:0 0 auto; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:10px; }
+  .stat .v { font-size:22px; font-weight:700; margin-top:4px; }
+  .stat .k { font-size:12.5px; color:var(--muted); }
+
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th, td { text-align:left; padding:9px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { font-size:12.5px; color:var(--muted); font-weight:600; white-space:nowrap; }
+  td.num, th.num { text-align:right; white-space:nowrap; }
+  tr.click { cursor:pointer; }
+  tr.click:hover td { background:var(--chip); }
+  .tablewrap { overflow-x:auto; }
+  .chip { display:inline-block; padding:2px 8px; border-radius:99px; background:var(--chip); font-size:12px; white-space:nowrap; }
+  .chip.off { color:var(--muted); }
+  .chip.warn { color:var(--warn); }
+  .chip.paid { color:var(--ok); }
+  .empty { text-align:center; color:var(--muted); padding:28px 0; }
+
+  /* มือถือ: ตารางกลายเป็นการ์ด (ใช้ data-label เป็นหัวข้อ) */
+  @media (max-width: 640px) {
+    table.cards thead { display:none; }
+    table.cards tr { display:block; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:8px 12px; margin-bottom:8px; }
+    table.cards td { display:flex; justify-content:space-between; gap:12px; border:none; padding:4px 0; text-align:right; }
+    table.cards td::before { content:attr(data-label); color:var(--muted); font-size:12.5px; text-align:left; flex:0 0 auto; }
+    table.cards td.num { white-space:normal; }
+    table.cards td.head { font-weight:700; font-size:15px; text-align:left; }
+    table.cards td.head::before { display:none; }
+  }
+
+  /* popup — มือถือ: เต็มจอ */
+  .modal { position:fixed; inset:0; z-index:20; background:rgba(0,0,0,.55); display:flex; align-items:safe center; justify-content:center; overflow-y:auto; padding:16px; }
+  .modal[hidden] { display:none; }
+  .sheet { background:var(--bg); border:1px solid var(--line); border-radius:16px; width:min(760px, 100%); padding:18px; margin:auto 0; }
+  .sheet .head { display:flex; align-items:center; gap:10px; margin-bottom:6px; }
+  .sheet .head h3 { margin:0; font-size:18px; flex:1; min-width:0; overflow-wrap:anywhere; }
+  .form2 { display:grid; grid-template-columns:1fr 1fr; gap:0 12px; }
+  .form2 .full { grid-column:1 / -1; }
+  @media (max-width: 640px) {
+    .modal { padding:0; align-items:stretch; }
+    .sheet { width:100%; min-height:100%; border-radius:0; border:none; margin:0;
+             padding:max(14px, env(safe-area-inset-top)) 16px max(20px, env(safe-area-inset-bottom)); }
+    .form2 { grid-template-columns:1fr; }
+  }
+  .actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:14px; }
+  .actions > button { flex:1 1 120px; }
+  .check { display:flex; align-items:center; gap:8px; margin-top:12px; font-weight:600; font-size:14px; }
+  .check input { width:22px; height:22px; min-height:0; }
+</style>
+</head>
+<body>
+
+<div id="login" class="wrap" style="max-width:440px; padding-top:12vh;">
+  <h1>เข้าสู่ระบบแอดมิน</h1>
+  <div class="muted" style="margin:6px 0 16px; font-size:14px;">จัดการพนักงาน ค่าคอมมิชชั่น และดูสรุปยอด</div>
+  <div class="card">
+    <label for="key">Admin Key</label>
+    <input id="key" type="password" autocomplete="current-password" placeholder="วางรหัสที่นี่" />
+    <button style="margin-top:12px; width:100%;" onclick="login()">เข้าใช้งาน</button>
+    <div id="loginMsg" class="err"></div>
+  </div>
+</div>
+
+<div id="app" hidden>
+  <div class="top">
+    <div class="row1">
+      <h1 style="flex:1; min-width:0;">แอดมิน</h1>
+      <a href="/staff" class="muted" style="font-size:13.5px; white-space:nowrap;">ปลดล็อควิดีโอ ↗</a>
+      <button class="ghost small" onclick="logout()">ออก</button>
+    </div>
+    <nav class="tabs" id="tabs">
+      <button data-tab="overview">ภาพรวม</button>
+      <button data-tab="staff">พนักงาน</button>
+      <button data-tab="sessions">เซสชันที่จบ</button>
+      <button data-tab="commission">ค่าคอม</button>
+    </nav>
+  </div>
+
+  <div class="wrap">
+    <!-- ช่วงวันที่ใช้ร่วมกันทุกแท็บ -->
+    <div class="bar" id="periodBar">
+      <div><label for="from">ตั้งแต่</label><input id="from" type="date" /></div>
+      <div><label for="to">ถึง</label><input id="to" type="date" /></div>
+      <button class="ghost" onclick="render()">โหลดใหม่</button>
+    </div>
+    <div id="view"></div>
+  </div>
+</div>
+
+<!-- popup รายบุคคล / ฟอร์มพนักงาน -->
+<div class="modal" id="modal" hidden onclick="if (event.target === this) closeModal()">
+  <div class="sheet" id="sheet"></div>
+</div>
+
+<script>
+/*
+ * หน้าแอดมิน — HTML ไฟล์เดียว ไม่มี build step (เสิร์ฟที่ /login)
+ * เรียก /api/admin/* ด้วย header X-Admin-Key · เก็บ key ใน sessionStorage (ปิดแท็บแล้วหาย)
+ * สเปก API: server/STAFF_COMMISSION_API.md หัวข้อ 5
+ */
+const KEY = 'sr.adminKey';
+const key = () => { try { return sessionStorage.getItem(KEY) || ''; } catch { return ''; } };
+const $ = (id) => document.getElementById(id);
+
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const baht = (n) => Number(n || 0).toLocaleString('th-TH', { maximumFractionDigits: 2 });
+const dt = (v) => v ? new Date(v).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' }) : '—';
+const dOnly = (v) => v ? new Date(v).toLocaleDateString('th-TH', { dateStyle: 'medium' }) : '—';
+const dur = (s) => s == null ? '—' : s >= 3600 ? `${Math.floor(s / 3600)} ชม. ${Math.round(s % 3600 / 60)} น.` : `${Math.round(s / 60)} น.`;
+const rate = (t, v) => t === 'percent' ? `${v}%` : t === 'fixed' ? `${baht(v)} ฿/เซสชัน` : '—';
+const who = (code, name) => code ? `<span class="mono">${esc(code)}</span> · ${esc(name)}` : esc(name || '—');
+
+async function api(path, options = {}) {
+  const r = await fetch('/api/admin' + path, {
+    ...options,
+    headers: { 'X-Admin-Key': key(), 'Content-Type': 'application/json', ...(options.headers || {}) },
+  });
+  const j = await r.json().catch(() => ({}));
+  if (r.status === 401) { logout(true); throw new Error('Admin Key ไม่ถูกต้อง'); }
+  if (!r.ok) throw new Error(j.error || 'เกิดข้อผิดพลาด (' + r.status + ')');
+  return j;
+}
+const period = () => `from=${$('from').value}&to=${$('to').value}`;
+
+// ── login ─────────────────────────────────────────────────────────────
+async function login() {
+  const v = $('key').value.trim() || key();
+  if (!v) return;
+  try { sessionStorage.setItem(KEY, v); } catch {}
+  try {
+    await api('/staff');
+    $('login').hidden = true;
+    $('app').hidden = false;
+    go(location.hash.slice(1) || 'overview');
+  } catch (e) {
+    try { sessionStorage.removeItem(KEY); } catch {}
+    $('loginMsg').textContent = e.message;
+  }
+}
+function logout(silent) {
+  try { sessionStorage.removeItem(KEY); } catch {}
+  if (!silent) location.reload();
+  else { $('app').hidden = true; $('login').hidden = false; }
+}
+$('key').addEventListener('keydown', (e) => e.key === 'Enter' && login());
+
+// ── tabs ──────────────────────────────────────────────────────────────
+let tab = 'overview';
+let staffList = [];
+function go(t) {
+  tab = ['overview', 'staff', 'sessions', 'commission'].includes(t) ? t : 'overview';
+  history.replaceState(null, '', '#' + tab);
+  document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
+  render();
+}
+$('tabs').addEventListener('click', (e) => e.target.dataset.tab && go(e.target.dataset.tab));
+
+async function render() {
+  const view = $('view');
+  view.innerHTML = '<div class="empty">กำลังโหลด…</div>';
+  try {
+    staffList = (await api('/staff')).items;
+    if (tab === 'overview') await renderOverview(view);
+    else if (tab === 'staff') renderStaff(view);
+    else if (tab === 'sessions') await renderSessions(view);
+    else await renderCommission(view);
+  } catch (e) {
+    view.innerHTML = `<div class="err">${esc(e.message)}</div>`;
+  }
+}
+
+// ── ภาพรวม ────────────────────────────────────────────────────────────
+async function renderOverview(view) {
+  const [s, c] = await Promise.all([api('/summary?' + period()), api('/commissions?' + period())]);
+  const u = s['การใช้งาน'] || {}, sale = s['การขาย'] || {};
+  const tiles = [
+    ['รายได้', baht(sale['รายได้']) + ' ฿'], ['จ่ายเงินแล้ว', sale['จ่ายแล้ว']],
+    ['เซสชัน', u['เซสชัน']], ['คลิปที่อัด', u['คลิปที่อัด']],
+    ['ลูกค้าเปิดดู', u['ลูกค้าเปิดดู']], ['อัตราการซื้อ', (sale['อัตราการซื้อ'] || 0) + '%'],
+    ['ค่าคอมรวม', baht(c.totals.commission) + ' ฿'], ['เซสชันที่ระบุพนักงาน', c.totals.sessions_confirmed],
+    ['เซสชันที่กดข้าม', c.totals.sessions_skipped],
+  ];
+  view.innerHTML = `<div class="grid">${tiles.map(([k, v]) =>
+    `<div class="card stat"><div class="k">${k}</div><div class="v">${esc(v ?? 0)}</div></div>`).join('')}</div>
+    ${c.totals.unmatched ? `<div class="card" style="color:var(--warn)">⚠ มี ${c.totals.unmatched} เซสชันที่จอเลนส่งพนักงานมาแต่หาในระบบไม่เจอ — แก้ได้ที่แท็บ "เซสชันที่จบ"</div>` : ''}`;
+}
+
+// ── พนักงาน ────────────────────────────────────────────────────────────
+function renderStaff(view) {
+  view.innerHTML = `
+    <div class="bar"><div class="muted" style="font-size:13.5px; align-self:center;">
+      เพิ่ม/ปิดพนักงานแล้ว จอเลนเห็นทันทีตอนเปิด popup "จบการใช้งาน" ครั้งถัดไป · แตะชื่อเพื่อดูรายละเอียด</div>
+      <button onclick="staffForm()">+ เพิ่มพนักงาน</button></div>
+    ${staffList.length ? `<div class="tablewrap"><table class="cards">
+      <thead><tr><th>รหัส · ชื่อ</th><th>เรทค่าคอม</th><th>เลน</th><th>โทร</th><th>สถานะ</th></tr></thead>
+      <tbody>${staffList.map((s) => `
+        <tr class="click" onclick="openStaff(${s.id})">
+          <td class="head">${who(s.code, s.name)}</td>
+          <td data-label="เรทค่าคอม">${rate(s.commission_type, s.commission_value)}</td>
+          <td data-label="เลน">${s.lanes ? esc(s.lanes.join(', ')) : 'ทุกเลน'}</td>
+          <td data-label="โทร">${esc(s.phone || '—')}</td>
+          <td data-label="สถานะ">${s.active ? '<span class="chip paid">ใช้งาน</span>' : '<span class="chip off">ปิดแล้ว</span>'}</td>
+        </tr>`).join('')}</tbody></table></div>`
+      : '<div class="empty">ยังไม่มีพนักงาน — กด "+ เพิ่มพนักงาน"</div>'}`;
+}
+
+function staffForm(s) {
+  const edit = !!s;
+  s = s || { commission_type: 'fixed', commission_value: 50, active: true };
+  openModal(`
+    <div class="head"><h3>${edit ? 'แก้ไข ' + who(s.code, s.name) : 'เพิ่มพนักงาน'}</h3>
+      <button class="ghost small" onclick="${edit ? `openStaff(${s.id})` : 'closeModal()'}">✕</button></div>
+    <div class="form2">
+      <div class="full"><label>ชื่อ *</label><input id="f_name" maxlength="100" value="${esc(s.name)}" /></div>
+      <div><label>รหัสพนักงาน</label><input id="f_code" class="mono" maxlength="20" placeholder="เว้นว่าง = ตั้งให้อัตโนมัติ (EMP01)" value="${esc(s.code)}" style="text-transform:uppercase" /></div>
+      <div><label>เบอร์โทร</label><input id="f_phone" type="tel" maxlength="32" value="${esc(s.phone)}" /></div>
+      <div><label>วิธีคิดค่าคอม</label><select id="f_type">
+        <option value="fixed" ${s.commission_type === 'fixed' ? 'selected' : ''}>บาทต่อเซสชัน (fixed)</option>
+        <option value="percent" ${s.commission_type === 'percent' ? 'selected' : ''}>% ของยอดขายเซสชัน</option></select></div>
+      <div><label>เรท</label><input id="f_value" type="number" inputmode="decimal" min="0" step="0.01" value="${esc(s.commission_value)}" /></div>
+      <div class="full"><label>เลนที่ทำงาน (คั่นด้วย , — เว้นว่าง = ทุกเลน)</label><input id="f_lanes" inputmode="numeric" placeholder="เช่น 1, 2" value="${esc((s.lanes || []).join(', '))}" /></div>
+      <div class="full"><label>หมายเหตุ</label><input id="f_note" maxlength="255" value="${esc(s.note)}" /></div>
+    </div>
+    <label class="check"><input id="f_active" type="checkbox" ${s.active ? 'checked' : ''} /> ใช้งาน (แสดงที่จอเลน)</label>
+    <div class="err" id="f_err"></div>
+    <div class="actions"><button onclick="saveStaff(${edit ? s.id : 'null'})">บันทึก</button></div>`);
+  $('f_name').focus();
+}
+
+async function saveStaff(id) {
+  const lanesTxt = $('f_lanes').value.trim();
+  const lanes = lanesTxt ? lanesTxt.split(/[,\s]+/).filter(Boolean).map(Number) : null;
+  if (lanes && lanes.some((n) => !Number.isInteger(n) || n < 1)) { $('f_err').textContent = 'เลขเลนต้องเป็นตัวเลข เช่น 1, 2'; return; }
+  const body = {
+    name: $('f_name').value.trim(), code: $('f_code').value.trim().toUpperCase() || null,
+    phone: $('f_phone').value.trim() || null, commission_type: $('f_type').value,
+    commission_value: $('f_value').value, lanes, note: $('f_note').value.trim() || null,
+    active: $('f_active').checked,
+  };
+  try {
+    const r = id
+      ? await api('/staff/' + id, { method: 'PATCH', body: JSON.stringify(body) })
+      : await api('/staff', { method: 'POST', body: JSON.stringify(body) });
+    staffList = (await api('/staff')).items;
+    if (tab === 'staff') renderStaff($('view'));
+    openStaff(id || r.id);
+  } catch (e) { $('f_err').textContent = e.message; }
+}
+
+// popup รายบุคคล: ข้อมูล + ยอดช่วงที่เลือก + เซสชัน + งวดค่าคอม
+async function openStaff(id) {
+  const s = staffList.find((x) => x.id === id);
+  if (!s) return;
+  openModal('<div class="empty">กำลังโหลด…</div>');
+  try {
+    const [com, ses, pay] = await Promise.all([
+      api('/commissions?' + period()),
+      api(`/session-ends?staff_id=${id}&limit=100&` + period()),
+      api(`/commission-payouts?staff_id=${id}&limit=50`),
+    ]);
+    const mine = com.items.find((r) => r.staff_id === id) || { sessions: 0, clips: 0, revenue: 0, commission: 0, paid_out: 0, outstanding: 0 };
+    openModal(`
+      <div class="head"><h3>${who(s.code, s.name)}</h3>
+        <button class="ghost small" onclick="staffForm(staffList.find((x) => x.id === ${id}))">แก้ไข</button>
+        <button class="ghost small" onclick="closeModal()">✕</button></div>
+      <div class="muted" style="font-size:13.5px">${rate(s.commission_type, s.commission_value)} · ${s.lanes ? 'เลน ' + esc(s.lanes.join(', ')) : 'ทุกเลน'}
+        ${s.phone ? ' · ' + esc(s.phone) : ''} · ${s.active ? '<span class="chip paid">ใช้งาน</span>' : '<span class="chip off">ปิดแล้ว</span>'}</div>
+      <h2>${dOnly(com.period.from)} – ${dOnly(com.period.to)}</h2>
+      <div class="grid">
+        ${[['เซสชัน', mine.sessions], ['คลิป', mine.clips], ['ยอดขาย', baht(mine.revenue) + ' ฿'],
+           ['ค่าคอม', baht(mine.commission) + ' ฿'], ['จ่ายแล้ว', baht(mine.paid_out) + ' ฿'], ['ค้างจ่าย', baht(mine.outstanding) + ' ฿']]
+          .map(([k, v]) => `<div class="card stat"><div class="k">${k}</div><div class="v" style="font-size:18px">${v}</div></div>`).join('')}
+      </div>
+      <div class="actions"><button onclick="createPayout(${id})" ${mine.sessions ? '' : 'disabled'}>ปิดยอดค่าคอมช่วงนี้</button></div>
+      <div class="err" id="p_err"></div>
+
+      <h2>งวดค่าคอม</h2>
+      ${pay.items.length ? `<div class="tablewrap"><table class="cards"><thead><tr><th>งวด</th><th>ช่วง</th><th class="num">เซสชัน</th><th class="num">ยอด</th><th>สถานะ</th><th></th></tr></thead>
+        <tbody>${pay.items.map((p) => `<tr>
+          <td class="head">#${p.id}</td>
+          <td data-label="ช่วง">${dOnly(p.period_from)} – ${dOnly(p.period_to)}</td>
+          <td data-label="เซสชัน" class="num">${p.sessions}</td>
+          <td data-label="ยอด" class="num">${baht(p.amount)} ฿</td>
+          <td data-label="สถานะ">${payChip(p.status)}${p.paid_at ? ' <span class="muted" style="font-size:12px">' + dt(p.paid_at) + '</span>' : ''}</td>
+          <td data-label="">${p.status === 'pending' ? `<button class="small" onclick="setPayout(${p.id}, 'paid', ${id})">จ่ายแล้ว</button>
+            <button class="ghost small" onclick="setPayout(${p.id}, 'void', ${id})">ยกเลิก</button>` : ''}</td>
+        </tr>`).join('')}</tbody></table></div>` : '<div class="empty">ยังไม่มีงวดค่าคอม</div>'}
+
+      <h2>เซสชัน (${ses.total})</h2>
+      ${ses.items.length ? sessionTable(ses.items, false) : '<div class="empty">ไม่มีเซสชันในช่วงนี้</div>'}`);
+  } catch (e) {
+    openModal(`<div class="head"><h3>${who(s.code, s.name)}</h3><button class="ghost small" onclick="closeModal()">✕</button></div><div class="err">${esc(e.message)}</div>`);
+  }
+}
+
+const payChip = (st) => ({ pending: '<span class="chip warn">รอจ่าย</span>', paid: '<span class="chip paid">จ่ายแล้ว</span>',
+                          void: '<span class="chip off">ยกเลิก</span>' }[st] || esc(st));
+
+async function createPayout(staffId) {
+  if (!confirm(`ปิดยอดค่าคอมช่วง ${$('from').value} ถึง ${$('to').value} ?\nหลังปิดยอดแล้ว แก้พนักงานของเซสชันในช่วงนี้ไม่ได้จนกว่าจะยกเลิกงวด`)) return;
+  try {
+    await api('/commission-payouts', { method: 'POST', body: JSON.stringify({ staff_id: staffId, from: $('from').value, to: $('to').value }) });
+    openStaff(staffId);
+  } catch (e) { $('p_err').textContent = e.message; }
+}
+async function setPayout(id, status, staffId) {
+  if (!confirm(status === 'paid' ? 'ยืนยันว่าจ่ายค่าคอมงวดนี้แล้ว?' : 'ยกเลิกงวดนี้? (คิดยอดใหม่ได้ภายหลัง)')) return;
+  try {
+    await api('/commission-payouts/' + id, { method: 'PATCH', body: JSON.stringify({ status }) });
+    staffId ? openStaff(staffId) : render();
+  } catch (e) { alert(e.message); }
+}
+
+// ── เซสชันที่จบ ────────────────────────────────────────────────────────
+function sessionTable(items, editable) {
+  return `<div class="tablewrap"><table class="cards"><thead><tr>
+    <th>เซสชัน</th><th>จบเมื่อ</th><th>เลน</th><th>นาน</th><th class="num">คลิป</th><th>พนักงาน</th><th class="num">ยอดขาย</th><th class="num">ค่าคอม</th></tr></thead>
+    <tbody>${items.map((r) => `<tr>
+      <td class="head mono">${esc(r.session_code)}</td>
+      <td data-label="จบเมื่อ">${dt(r.ended_at)}</td>
+      <td data-label="เลน">${esc(r.lane ?? '—')}</td>
+      <td data-label="นาน">${dur(r.duration_s)}</td>
+      <td data-label="คลิป" class="num">${r.clip_count}</td>
+      <td data-label="พนักงาน">${r.action === 'skip' ? '<span class="chip off">ข้าม</span>'
+        : r.staff_matched ? who(r.staff_code, r.staff_name) : `<span class="chip warn">ไม่พบ: ${esc(r.staff_name || '?')}</span>`}
+        ${editable ? `<div style="margin-top:6px"><select onchange="changeStaff(${r.id}, this)" style="min-height:36px; padding:4px 8px">
+          <option value="">— เปลี่ยนพนักงาน —</option><option value="null">ไม่ระบุ (ข้าม)</option>
+          ${staffList.map((s) => `<option value="${s.id}">${esc(s.code ? s.code + ' · ' + s.name : s.name)}</option>`).join('')}</select></div>` : ''}</td>
+      <td data-label="ยอดขาย" class="num">${baht(r.revenue)} ฿</td>
+      <td data-label="ค่าคอม" class="num">${baht(r.commission)} ฿</td>
+    </tr>`).join('')}</tbody></table></div>`;
+}
+
+let sesFilter = '';
+async function renderSessions(view) {
+  const q = sesFilter === 'unmatched' ? '&unmatched=1' : sesFilter ? '&action=' + sesFilter : '';
+  const d = await api('/session-ends?limit=200&' + period() + q);
+  view.innerHTML = `
+    <div class="bar"><div><label>แสดง</label><select onchange="sesFilter = this.value; render()">
+      ${[['', 'ทั้งหมด'], ['confirm', 'ระบุพนักงาน'], ['skip', 'กดข้าม'], ['unmatched', 'หาพนักงานไม่เจอ']]
+        .map(([v, t]) => `<option value="${v}" ${v === sesFilter ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+      <div class="muted" style="font-size:13.5px; align-self:center; flex:2 1 220px">${d.total} เซสชัน${d.total > d.items.length ? ` (แสดง ${d.items.length} ล่าสุด)` : ''}
+        · กดผิด/ข้ามแล้วอยากระบุ → เลือกพนักงานใหม่ได้เลย</div></div>
+    ${d.items.length ? sessionTable(d.items, true) : '<div class="empty">ไม่มีเซสชันในช่วงนี้</div>'}`;
+}
+
+async function changeStaff(id, sel) {
+  if (!sel.value) return;
+  const staffId = sel.value === 'null' ? null : Number(sel.value);
+  const name = staffId ? sel.options[sel.selectedIndex].text : 'ไม่ระบุ (ข้าม)';
+  if (!confirm(`เปลี่ยนพนักงานของเซสชันนี้เป็น "${name}" ?`)) { sel.value = ''; return; }
+  try {
+    await api('/session-ends/' + id, { method: 'PATCH', body: JSON.stringify({ staff_id: staffId }) });
+    render();
+  } catch (e) { alert(e.message); sel.value = ''; }
+}
+
+// ── ค่าคอม ────────────────────────────────────────────────────────────
+async function renderCommission(view) {
+  const [c, pend] = await Promise.all([api('/commissions?' + period()), api('/commission-payouts?status=pending&limit=100')]);
+  const t = c.totals;
+  view.innerHTML = `
+    <div class="grid">${[['ค่าคอมรวม', baht(t.commission) + ' ฿'], ['ยอดขายรวม', baht(t.revenue) + ' ฿'],
+      ['เซสชันที่จบ', t.sessions_ended], ['ระบุพนักงาน', t.sessions_confirmed], ['กดข้าม', t.sessions_skipped]]
+      .map(([k, v]) => `<div class="card stat"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('')}</div>
+    <h2>ต่อพนักงาน</h2>
+    ${c.items.length ? `<div class="tablewrap"><table class="cards"><thead><tr><th>พนักงาน</th><th class="num">เซสชัน</th><th class="num">ยอดขาย</th><th class="num">ค่าคอม</th><th class="num">จ่ายแล้ว</th><th class="num">ค้างจ่าย</th></tr></thead>
+      <tbody>${c.items.map((r) => `<tr class="click" onclick="openStaff(${r.staff_id})">
+        <td class="head">${who(r.staff_code, r.staff_name)}</td>
+        <td data-label="เซสชัน" class="num">${r.sessions}</td>
+        <td data-label="ยอดขาย" class="num">${baht(r.revenue)} ฿</td>
+        <td data-label="ค่าคอม" class="num">${baht(r.commission)} ฿</td>
+        <td data-label="จ่ายแล้ว" class="num">${baht(r.paid_out)} ฿</td>
+        <td data-label="ค้างจ่าย" class="num"><b>${baht(r.outstanding)} ฿</b></td>
+      </tr>`).join('')}</tbody></table></div>` : '<div class="empty">ยังไม่มีค่าคอมในช่วงนี้</div>'}
+    <h2>งวดที่รอจ่าย</h2>
+    ${pend.items.length ? `<div class="tablewrap"><table class="cards"><thead><tr><th>งวด</th><th>พนักงาน</th><th>ช่วง</th><th class="num">ยอด</th><th></th></tr></thead>
+      <tbody>${pend.items.map((p) => { const s = staffList.find((x) => x.id === p.staff_id) || {}; return `<tr>
+        <td class="head">#${p.id}</td>
+        <td data-label="พนักงาน">${who(s.code, p.staff_name)}</td>
+        <td data-label="ช่วง">${dOnly(p.period_from)} – ${dOnly(p.period_to)}</td>
+        <td data-label="ยอด" class="num">${baht(p.amount)} ฿</td>
+        <td data-label=""><button class="small" onclick="setPayout(${p.id}, 'paid')">จ่ายแล้ว</button>
+          <button class="ghost small" onclick="setPayout(${p.id}, 'void')">ยกเลิก</button></td></tr>`; }).join('')}</tbody></table></div>`
+      : '<div class="empty">ไม่มีงวดรอจ่าย — เปิดดูพนักงานแต่ละคนเพื่อปิดยอด</div>'}`;
+}
+
+// ── popup ─────────────────────────────────────────────────────────────
+function openModal(html) {
+  $('sheet').innerHTML = html;
+  $('modal').hidden = false;
+  document.body.style.overflow = 'hidden';
+}
+function closeModal() {
+  $('modal').hidden = true;
+  document.body.style.overflow = '';
+}
+document.addEventListener('keydown', (e) => e.key === 'Escape' && !$('modal').hidden && closeModal());
+
+// ── start ─────────────────────────────────────────────────────────────
+(function initPeriod() {
+  // ค่าเริ่มต้น: ต้นเดือนนี้ → วันนี้ (เวลาไทยตามเครื่อง)
+  const now = new Date();
+  const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  $('from').value = ymd(new Date(now.getFullYear(), now.getMonth(), 1));
+  $('to').value = ymd(now);
+  $('from').addEventListener('change', render);
+  $('to').addEventListener('change', render);
+})();
+if (key()) login();
+</script>
+</body>
+</html>

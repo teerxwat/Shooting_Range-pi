@@ -62,6 +62,14 @@ export function periodRange(query, { required = false } = {}) {
  * partial=true (PATCH) → ส่งเฉพาะ field ที่แก้
  * คืน { values } (เฉพาะ field ที่ส่งมา, พร้อมเขียนลง DB) หรือ { error }
  */
+export const STAFF_CODE_RE = /^[A-Z0-9_-]{1,20}$/;
+
+/** รหัสอัตโนมัติจาก id: 1 → EMP01, 123 → EMP123 */
+export const autoStaffCode = (id) => `EMP${String(id).padStart(2, '0')}`;
+
+/** ข้อความที่จอเลนแสดงใน dropdown: "EMP01 · สมชาย" */
+export const staffLabel = (s) => (s.code ? `${s.code} · ${s.name}` : s.name);
+
 export function validateStaff(body, { partial = false } = {}) {
   const b = body || {};
   const v = {};
@@ -71,6 +79,14 @@ export function validateStaff(body, { partial = false } = {}) {
     const name = String(b.name ?? '').trim();
     if (!name || name.length > 100) return { error: 'name ต้องมี 1–100 ตัวอักษร' };
     v.name = name;
+  }
+  if (has('code')) {
+    // ว่าง/null = ให้ระบบตั้งให้อัตโนมัติ (EMP + id) — ตัวพิมพ์ใหญ่เสมอ
+    const code = b.code == null ? '' : String(b.code).trim().toUpperCase();
+    if (code && !STAFF_CODE_RE.test(code)) {
+      return { error: 'code ต้องเป็น A-Z, 0-9, - หรือ _ ยาว 1–20 ตัว เช่น EMP01' };
+    }
+    if (code || partial) v.code = code || null;
   }
   if (has('phone')) {
     const phone = b.phone == null ? null : String(b.phone).trim();
@@ -117,7 +133,9 @@ export function percentTooHigh(type, value) {
 export function staffOut(s) {
   return {
     id: num(s.id),
+    code: s.code ?? null,
     name: s.name,
+    label: staffLabel(s),
     phone: s.phone,
     commission_type: s.commission_type,
     commission_value: num(s.commission_value),

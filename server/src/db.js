@@ -122,6 +122,7 @@ const TABLES = [
   `CREATE TABLE IF NOT EXISTS staff (
      id                BIGINT AUTO_INCREMENT PRIMARY KEY,
      name              VARCHAR(100)  NOT NULL,
+     code              VARCHAR(20),                             -- รหัสพนักงาน เช่น EMP01 (ไม่ซ้ำ)
      phone             VARCHAR(32),
      commission_type   VARCHAR(10)   NOT NULL DEFAULT 'fixed',  -- fixed | percent
      commission_value  DECIMAL(10,2) NOT NULL DEFAULT 0,        -- fixed = บาท/เซสชัน, percent = % ยอดขายเซสชัน
@@ -218,6 +219,8 @@ async function migrate() {
   for (const sql of [
     'ALTER TABLE orders ADD COLUMN pay_ref VARCHAR(64)',
     'ALTER TABLE orders ADD COLUMN pay_expires_at DATETIME(3)',
+    // รหัสพนักงาน (EMP01) — จอเลนแสดง "EMP01 · ชื่อ" ใน dropdown จบการใช้งาน
+    'ALTER TABLE staff ADD COLUMN code VARCHAR(20) AFTER name',
   ]) {
     try {
       await pool.query(sql);
@@ -225,6 +228,21 @@ async function migrate() {
     } catch (e) {
       if (e.errno !== 1060) console.error('  [migrate]', e.message);  // 1060 = คอลัมน์มีแล้ว
     }
+  }
+
+  // พนักงานที่เพิ่มก่อนมีคอลัมน์ code → ให้รหัสอัตโนมัติ EMP + id (EMP01, EMP02, …)
+  try {
+    await pool.query(
+      `UPDATE staff SET code = CONCAT('EMP', LPAD(id, 2, '0')) WHERE code IS NULL OR code = ''`
+    );
+  } catch (e) {
+    console.error('  [migrate] staff.code', e.message);
+  }
+  try {
+    await pool.query('CREATE UNIQUE INDEX uq_staff_code ON staff (code)');
+    console.log('  เพิ่ม unique index บน staff.code แล้ว');
+  } catch (e) {
+    if (e.errno !== 1061) console.error('  [migrate]', e.message);   // 1061 = index มีอยู่แล้ว
   }
 }
 

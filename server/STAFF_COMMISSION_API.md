@@ -12,7 +12,8 @@
 | เซิร์ฟเวอร์หลัก: ingest API (หัวข้อ 4) | ✅ ทำแล้ว — `server/src/routes/ingest.js` |
 | เซิร์ฟเวอร์หลัก: admin API (หัวข้อ 5) | ✅ ทำแล้ว — `server/src/routes/admin.js` + `server/src/staff.js` |
 | ทดสอบอัตโนมัติ | ✅ `npm run selftest` (หัวข้อ 2.1 ในไฟล์ `selftest.js`) |
-| หน้าเว็บจัดการผู้ดูแล / รายงานค่าคอม | ⬜ ยังไม่ทำ — เรียก admin API หัวข้อ 5 |
+| หน้าเว็บจัดการผู้ดูแล / รายงานค่าคอม | ✅ ทำแล้ว — `/login` (`server/public/admin.html`) แท็บ ภาพรวม · พนักงาน · เซสชันที่จบ · ค่าคอม |
+| รหัสพนักงาน (`EMP01`) — dropdown ที่จอแสดง `รหัส · ชื่อ` | ✅ ทำแล้ว — คอลัมน์ `staff.code` + `label` ใน ingest API |
 
 ---
 
@@ -88,8 +89,8 @@ Base URL: `http://<pi>:8000` (เช่น `http://7lnetwork-s2:8000`) — ไ�
 {
   "source": "cloud",
   "staff": [
-    { "id": "7", "name": "สมชาย ใจดี" },
-    { "id": "9", "name": "สมหญิง รักงาน" }
+    { "id": "7", "name": "สมชาย ใจดี", "code": "EMP01", "label": "EMP01 · สมชาย ใจดี" },
+    { "id": "9", "name": "สมหญิง รักงาน", "code": "EMP02", "label": "EMP02 · สมหญิง รักงาน" }
   ]
 }
 ```
@@ -98,7 +99,9 @@ Base URL: `http://<pi>:8000` (เช่น `http://7lnetwork-s2:8000`) — ไ�
 |---|---|---|
 | `source` | `"cloud"` \| `"cache"` \| `"local"` \| `"none"` | รายชื่อมาจากไหน (`none` = ไม่มีรายชื่อเลย → popup ให้กดได้แค่ ข้าม) |
 | `staff[].id` | string | รหัสผู้ดูแล (Pi แปลงเป็น string เสมอ แม้เซิร์ฟเวอร์ส่งเป็นตัวเลข) |
-| `staff[].name` | string | ชื่อที่แสดงใน dropdown |
+| `staff[].name` | string | ชื่อผู้ดูแล |
+| `staff[].code` | string (ไม่บังคับ) | รหัสพนักงาน เช่น `EMP01` — มีเมื่อเซิร์ฟเวอร์ส่งมา |
+| `staff[].label` | string (ไม่บังคับ) | ข้อความใน dropdown `"EMP01 · สมชาย ใจดี"` — ไม่มี = จอแสดงแค่ `name` |
 
 > Pi กรองคนที่ `"active": false` ออกให้แล้ว
 
@@ -200,6 +203,7 @@ MySQL/MariaDB, `utf8mb4`, **เวลาเก็บเป็น UTC** เหม
 CREATE TABLE IF NOT EXISTS staff (
   id                BIGINT AUTO_INCREMENT PRIMARY KEY,
   name              VARCHAR(100)  NOT NULL,                 -- ชื่อที่แสดงใน dropdown ที่เลน
+  code              VARCHAR(20),                            -- รหัสพนักงาน เช่น EMP01 (unique: uq_staff_code)
   phone             VARCHAR(32),
   commission_type   VARCHAR(10)   NOT NULL DEFAULT 'fixed', -- fixed | percent
   commission_value  DECIMAL(10,2) NOT NULL DEFAULT 0,       -- fixed = บาทต่อเซสชัน, percent = % ของยอดขายเซสชัน
@@ -213,6 +217,8 @@ CREATE TABLE IF NOT EXISTS staff (
 ```
 
 - **ห้ามลบแถว** — ถ้าลาออกให้ตั้ง `active = 0` ประวัติค่าคอมเดิมจะยังผูกกับ id ได้
+- `code` ถูกเพิ่มทีหลังด้วย `ALTER TABLE` ตอนเปิด server — แถวเดิมได้รหัสอัตโนมัติ `EMP` + id (`EMP01`, `EMP02`, …)
+  เพิ่มคนใหม่โดยไม่ระบุ `code` → ระบบตั้งให้แบบเดียวกัน
 - MariaDB เก็บ `JSON` เป็น `LONGTEXT` — กรอง `lanes` ในโค้ด JS ง่ายกว่าใน SQL
 
 ### 3.2 `session_ends` — รายงานจบเซสชัน (ตารางถาวร ไม่ลบตามอายุไฟล์)
@@ -307,14 +313,14 @@ Pi เรียกทุกครั้งที่เปิด popup (timeout 3
 ```json
 {
   "staff": [
-    { "id": 7, "name": "สมชาย ใจดี", "active": true },
-    { "id": 9, "name": "สมหญิง รักงาน", "active": true }
+    { "id": 7, "code": "EMP01", "name": "สมชาย ใจดี", "label": "EMP01 · สมชาย ใจดี", "active": true },
+    { "id": 9, "code": "EMP02", "name": "สมหญิง รักงาน", "label": "EMP02 · สมหญิง รักงาน", "active": true }
   ]
 }
 ```
 
 - คืนเฉพาะ `active = 1` (ถ้าส่งคนที่ `active: false` มา Pi จะกรองทิ้งให้อีกชั้น)
-- เรียงตามชื่อ (`ORDER BY name`)
+- เรียงตามรหัสแล้วชื่อ (`ORDER BY code, name`)
 - **ไม่ต้องส่งเรทค่าคอม** มาที่ Pi
 
 **Errors:** `401` API key ผิด
@@ -458,6 +464,7 @@ Query ทางเลือก: `?active=1` (เฉพาะคนที่ใ�
 | field | type | required | validation |
 |---|---|---|---|
 | `name` | string | ✅ | 1–100 ตัวอักษร |
+| `code` | string | | `A-Z 0-9 - _` ≤ 20 ตัว (แปลงเป็นตัวใหญ่) · ไม่ส่ง/ว่าง = ตั้งให้อัตโนมัติ `EMP01` · ซ้ำ → `409` |
 | `phone` | string | | ≤ 32 |
 | `commission_type` | `"fixed"` \| `"percent"` | ✅ | |
 | `commission_value` | number | ✅ | ≥ 0, `percent` ≤ 100 |
@@ -465,7 +472,7 @@ Query ทางเลือก: `?active=1` (เฉพาะคนที่ใ�
 | `active` | boolean | | default `true` |
 | `note` | string | | ≤ 255 |
 
-Response `201` → `{ "ok": true, "id": 7 }` · `400` validation
+Response `201` → `{ "ok": true, "id": 7, "code": "EMP07" }` · `400` validation · `409` รหัสซ้ำ
 
 - `lanes: []` เก็บเป็น `null` (= ทุกเลน), เลขซ้ำถูกตัดออก
 - `commission_value` ปัดเป็นทศนิยม 2 ตำแหน่ง, `phone`/`note` ส่ง `""` = ลบค่า
@@ -833,4 +840,4 @@ Checklist
 - [ ] เปิด popup ที่จอเลน → dropdown ต้องขึ้นรายชื่อจากเซิร์ฟเวอร์ (`GET http://7lnetwork-s2:8000/api/staff` → `"source": "cloud"`)
 - [ ] ดู log บน Pi: `journalctl -u gopro-kiosk -f | grep report` → ต้องเห็น `[report] ✅ ส่งรายงานจบเซสชัน ...`
 - [ ] รายงานที่ค้างใน `.session/session_reports.jsonl` บน Pi (ตอนนี้ 1 รายการ) ทยอยส่งขึ้นเองภายใน 60 วินาที
-- [ ] หน้าเว็บจัดการรายชื่อผู้ดูแล + รายงานค่าคอม
+- [x] หน้าเว็บจัดการรายชื่อผู้ดูแล + รายงานค่าคอม → `https://shot24.shop/login` (ใส่ Admin Key)
