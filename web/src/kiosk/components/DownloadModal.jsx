@@ -67,7 +67,7 @@ export default function DownloadModal({ open, videoUrl, fileName, onClose }) {
 
         <div
           style={{
-            fontFamily: "'IBM Plex Mono', monospace",
+            fontFamily: "'IBM Plex Mono', 'IBM Plex Sans Thai', monospace",
             fontSize: '12.5px',
             color: 'var(--muted)',
             marginTop: '10px',

@@ -97,7 +97,7 @@ export default function PaymentModal({ open, refCode, priceLabel, prepareFile, o
             <QRCanvas seed={42} />
             <div
               style={{
-                fontFamily: "'IBM Plex Mono', monospace",
+                fontFamily: "'IBM Plex Mono', 'IBM Plex Sans Thai', monospace",
                 fontSize: '12.5px',
                 color: 'var(--muted)',
                 marginTop: '10px'
@@ -180,7 +180,7 @@ export default function PaymentModal({ open, refCode, priceLabel, prepareFile, o
             </div>
             <div
               style={{
-                fontFamily: "'IBM Plex Mono', monospace",
+                fontFamily: "'IBM Plex Mono', 'IBM Plex Sans Thai', monospace",
                 fontSize: '12.5px',
                 color: 'var(--muted)',
                 marginTop: '10px',

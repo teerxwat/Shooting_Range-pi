@@ -57,7 +57,7 @@ export default function Header() {
       {/* นาฬิกาเป็นของประดับ — จอมือถือแคบซ่อนไว้ให้ปุ่มมีที่หายใจ */}
       <div
         className="hide-sm"
-        style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: '14px', color: 'var(--muted)' }}
+        style={{ fontFamily: "'IBM Plex Mono', 'IBM Plex Sans Thai', monospace", fontSize: '14px', color: 'var(--muted)' }}
       >
         {clock}
       </div>

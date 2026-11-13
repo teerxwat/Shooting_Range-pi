@@ -55,7 +55,7 @@ export default function Videos() {
           </h1>
           <span
             style={{
-              fontFamily: "'IBM Plex Mono', monospace",
+              fontFamily: "'IBM Plex Mono', 'IBM Plex Sans Thai', monospace",
               fontSize: '14px',
               background: 'var(--surface2)',
               border: '1px solid var(--border)',
@@ -102,7 +102,7 @@ export default function Videos() {
                   }}
                 >
                   <div style={{ flex: '1 1 160px', minWidth: 0 }}>
-                    <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: '14.5px', fontWeight: 600 }}>
+                    <div style={{ fontFamily: "'IBM Plex Mono', 'IBM Plex Sans Thai', monospace", fontSize: '14.5px', fontWeight: 600 }}>
                       {o.label}
                     </div>
                     <div style={{ fontSize: '13px', color: 'var(--muted)' }}>
@@ -225,7 +225,7 @@ export default function Videos() {
                   <div style={{ fontWeight: 600, fontSize: '16px' }}>
                     {t.clip} {v.sub_no}
                   </div>
-                  <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: '12.5px', color: 'var(--muted)' }}>
+                  <div style={{ fontFamily: "'IBM Plex Mono', 'IBM Plex Sans Thai', monospace", fontSize: '12.5px', color: 'var(--muted)' }}>
                     {new Date(v.created_at).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })}
                   </div>
                 </div>

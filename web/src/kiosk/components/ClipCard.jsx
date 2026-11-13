@@ -56,7 +56,7 @@ export default function ClipCard({ clip, n, onOpen }) {
             position: 'absolute',
             bottom: '8px',
             right: '8px',
-            fontFamily: "'IBM Plex Mono', monospace",
+            fontFamily: "'IBM Plex Mono', 'IBM Plex Sans Thai', monospace",
             fontSize: '12px',
             background: 'rgba(20,20,20,.72)',
             color: '#fff',
@@ -79,7 +79,7 @@ export default function ClipCard({ clip, n, onOpen }) {
         <div style={{ fontWeight: 600, fontSize: '16px' }}>
           {t.clip} {n}
         </div>
-        <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: '13px', color: 'var(--muted)' }}>
+        <div style={{ fontFamily: "'IBM Plex Mono', 'IBM Plex Sans Thai', monospace", fontSize: '13px', color: 'var(--muted)' }}>
           {clip.time}
         </div>
       </div>

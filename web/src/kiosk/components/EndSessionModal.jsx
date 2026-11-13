@@ -9,6 +9,10 @@ import { getStaff, endSession } from '@/kiosk/api';
  *   ยืนยัน   = จบเซสชัน + ส่งผู้ดูแลที่เลือก   → POST /end { action: 'confirm', staff_id }
  * สเปก API/payload ทั้งหมด: server/STAFF_COMMISSION_API.md
  */
+// ข้อความใน dropdown: "EMP01 · สมชาย" — ใช้ label จากเซิร์ฟเวอร์ก่อน, ไม่มีก็ประกอบจาก code
+// Pi/เซิร์ฟเวอร์รุ่นเก่าส่งมาแค่ id + name → แสดงแค่ชื่อเหมือนเดิม
+const staffLabel = (s) => s.label || (s.code ? `${s.code} · ${s.name}` : s.name);
+
 export default function EndSessionModal({ open, laneId, sessionCode, onClose, onEnded }) {
   const { t } = useApp();
   const [staff, setStaff] = useState(null); // null = กำลังโหลดรายชื่อ
@@ -49,10 +53,11 @@ export default function EndSessionModal({ open, laneId, sessionCode, onClose, on
   const empty = !loading && staff.length === 0;
 
   const btn = {
-    minHeight: '58px',
+    minHeight: 'clamp(48px, 11vmin, 58px)',
     borderRadius: '12px',
     fontFamily: 'inherit',
-    fontSize: '17px',
+    fontSize: 'clamp(15px, 3.8vmin, 17px)',
+    padding: '0 6px',
     fontWeight: 700,
     cursor: 'pointer',
     border: '1px solid var(--border)',
@@ -71,9 +76,11 @@ export default function EndSessionModal({ open, laneId, sessionCode, onClose, on
         zIndex: 70,
         background: 'rgba(0,0,0,.72)',
         display: 'flex',
-        alignItems: 'center',
+        // จอเตี้ย (มือถือแนวนอน): กล่องสูงกว่าจอ → เลื่อนดูได้ ไม่ถูกตัดหัว/ปุ่มล่าง
+        alignItems: 'safe center',
         justifyContent: 'center',
-        padding: '16px'
+        overflowY: 'auto',
+        padding: 'max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom))'
       }}
     >
       <div
@@ -81,17 +88,18 @@ export default function EndSessionModal({ open, laneId, sessionCode, onClose, on
           background: 'var(--bg)',
           color: 'var(--text)',
           borderRadius: '20px',
-          padding: '30px 32px',
+          padding: 'clamp(18px, 4vmin, 30px) clamp(16px, 4vw, 32px)',
           width: 'min(480px, 100%)',
+          margin: 'auto 0',
           border: '1px solid var(--border)',
           boxSizing: 'border-box'
         }}
       >
-        <div style={{ fontSize: '25px', fontWeight: 800, textAlign: 'center' }}>{t.endSession}</div>
+        <div style={{ fontSize: 'clamp(20px, 5vmin, 25px)', fontWeight: 800, textAlign: 'center' }}>{t.endSession}</div>
         {sessionCode && (
           <div
             style={{
-              fontFamily: "'IBM Plex Mono', monospace",
+              fontFamily: "'IBM Plex Mono', 'IBM Plex Sans Thai', monospace",
               fontSize: '15px',
               color: 'var(--muted)',
               textAlign: 'center',
@@ -101,11 +109,11 @@ export default function EndSessionModal({ open, laneId, sessionCode, onClose, on
             {t.session}: {sessionCode}
           </div>
         )}
-        <div style={{ fontSize: '15.5px', color: 'var(--muted)', marginTop: '12px', lineHeight: 1.55, textAlign: 'center' }}>
+        <div style={{ fontSize: 'clamp(14px, 3.6vmin, 15.5px)', color: 'var(--muted)', marginTop: '10px', lineHeight: 1.5, textAlign: 'center' }}>
           {t.endHelp}
         </div>
 
-        <label style={{ display: 'block', fontSize: '14px', fontWeight: 600, margin: '22px 0 8px' }}>
+        <label style={{ display: 'block', fontSize: '14px', fontWeight: 600, margin: 'clamp(12px, 3vmin, 22px) 0 8px' }}>
           {t.staffLabel}
         </label>
         <select
@@ -114,7 +122,7 @@ export default function EndSessionModal({ open, laneId, sessionCode, onClose, on
           disabled={busy || loading || empty}
           style={{
             width: '100%',
-            minHeight: '60px',
+            minHeight: 'clamp(48px, 11vmin, 60px)',
             padding: '0 14px',
             borderRadius: '12px',
             border: `2px solid ${staffId ? 'var(--accent)' : 'var(--border)'}`,
@@ -127,7 +135,7 @@ export default function EndSessionModal({ open, laneId, sessionCode, onClose, on
           <option value="">{loading ? t.staffLoading : t.staffPlaceholder}</option>
           {(staff || []).map((s) => (
             <option key={s.id} value={s.id}>
-              {s.name}
+              {staffLabel(s)}
             </option>
           ))}
         </select>

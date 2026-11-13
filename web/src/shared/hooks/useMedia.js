@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
 
-/** true เมื่อจอแคบกว่าที่กำหนด — ใช้สลับ layout ระหว่างมือถือกับจอใหญ่ */
-export function useIsMobile(maxWidth = 560) {
-  const query = `(max-width: ${maxWidth}px)`;
+/** true เมื่อ media query ตรง เช่น useMedia('(max-width: 900px)') — อัปเดตเองตอนหมุนจอ/ย่อหน้าต่าง */
+export function useMedia(query) {
   const [match, setMatch] = useState(
     () => typeof window !== 'undefined' && window.matchMedia(query).matches
   );
@@ -17,3 +16,9 @@ export function useIsMobile(maxWidth = 560) {
 
   return match;
 }
+
+/** true เมื่อจอแคบกว่าที่กำหนด — ใช้สลับ layout ระหว่างมือถือกับจอใหญ่ */
+export const useIsMobile = (maxWidth = 560) => useMedia(`(max-width: ${maxWidth}px)`);
+
+/** true เมื่อจอเตี้ย (มือถือแนวนอน) */
+export const useIsShort = (maxHeight = 500) => useMedia(`(max-height: ${maxHeight}px)`);

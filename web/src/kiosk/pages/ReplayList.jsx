@@ -81,7 +81,7 @@ export default function ReplayList() {
           <div style={{ color: 'var(--muted)', fontSize: '15px' }}>{t.noClips}</div>
         )}
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '18px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(260px, 100%), 1fr))', gap: '18px' }}>
           {list.map((clip, i) => (
             <ClipCard key={clip.path} clip={clip} n={i + 1} onOpen={() => navigate(`/lane/${laneId}/clips/${i}`)} />
           ))}

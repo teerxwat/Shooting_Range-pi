@@ -330,7 +330,7 @@ export default function CheckoutModal({ open, videoId, label, filter, speed, pri
               )}
 
               {refNo && (
-                <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: '11.5px', color: 'var(--muted)', marginTop: '8px' }}>
+                <div style={{ fontFamily: "'IBM Plex Mono', 'IBM Plex Sans Thai', monospace", fontSize: '11.5px', color: 'var(--muted)', marginTop: '8px' }}>
                   {refNo}
                 </div>
               )}
@@ -396,7 +396,7 @@ export default function CheckoutModal({ open, videoId, label, filter, speed, pri
                     <div style={{ borderTop: '1px solid var(--border)' }} />
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '14px', padding: '9px 0', fontSize: '13px' }}>
                       <span style={{ color: 'var(--muted)' }}>{t.refNo}</span>
-                      <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: '12px', wordBreak: 'break-all', textAlign: 'right' }}>{refNo}</span>
+                      <span style={{ fontFamily: "'IBM Plex Mono', 'IBM Plex Sans Thai', monospace", fontSize: '12px', wordBreak: 'break-all', textAlign: 'right' }}>{refNo}</span>
                     </div>
                   </>
                 )}

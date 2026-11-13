@@ -30,7 +30,7 @@ export default function LanguageSwitcher() {
           background: 'var(--surface2)',
           color: 'var(--text)',
           fontFamily: 'inherit',
-          fontSize: '15px',
+          fontSize: '16px', // ≥16px — iPhone ไม่ซูมหน้าเว็บตอนแตะ dropdown
           fontWeight: 600,
           cursor: 'pointer',
           appearance: 'none',

@@ -158,7 +158,7 @@ export default function Studio() {
           </h1>
           <span
             style={{
-              fontFamily: "'IBM Plex Mono', monospace", fontSize: '13px',
+              fontFamily: "'IBM Plex Mono', 'IBM Plex Sans Thai', monospace", fontSize: '13px',
               background: 'var(--surface2)', border: '1px solid var(--border)',
               borderRadius: '8px', padding: '6px 11px', color: 'var(--muted)'
             }}
@@ -173,8 +173,9 @@ export default function Studio() {
           onMouseMove={wakeBar}
           onMouseLeave={() => playing && setShowBar(false)}
           style={{
-            position: 'relative', width: '100%', aspectRatio: '16/9',
-            maxHeight: '68vh', borderRadius: '16px', overflow: 'hidden',
+            // คงสัดส่วน 16:9 — จำกัดกว้างจากความสูงจอแทน maxHeight (เดิมกล่องเตี้ยผิดสัดส่วนบนแนวนอน/แท็บเล็ต)
+            position: 'relative', width: 'min(100%, calc(68dvh * 16 / 9))', margin: '0 auto', aspectRatio: '16/9',
+            borderRadius: '16px', overflow: 'hidden',
             border: '1px solid var(--border)', background: '#000',
             display: 'flex', alignItems: 'center', justifyContent: 'center'
           }}
@@ -240,7 +241,7 @@ export default function Studio() {
               <button onClick={togglePlay} style={roundBtn} aria-label="play/pause">
                 {playing ? '❚❚' : '▶'}
               </button>
-              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: '13px', color: '#fff' }}>
+              <div style={{ fontFamily: "'IBM Plex Mono', 'IBM Plex Sans Thai', monospace", fontSize: '13px', color: '#fff' }}>
                 {fmt(tpos)} / {fmt(dur)}
               </div>
               <div style={{ flex: 1 }} />

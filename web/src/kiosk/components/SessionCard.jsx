@@ -12,7 +12,7 @@ export default function SessionCard({ code, pin, site, pending = 0 }) {
   const url = site ? `${site}/?s=${encodeURIComponent(code)}` : '';
 
   const big = {
-    fontFamily: "'IBM Plex Mono', monospace",
+    fontFamily: "'IBM Plex Mono', 'IBM Plex Sans Thai', monospace",
     fontSize: '30px',
     fontWeight: 800,
     letterSpacing: '2px',

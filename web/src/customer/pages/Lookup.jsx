@@ -11,6 +11,19 @@ import { lookup, saveAuth, saveVideos, getRecentSessions, rememberSession, forge
  *   ขั้น 1  กรอกเลขเซสชันอย่างเดียว (สแกน QR จากจอที่สนามจะข้ามมาขั้น 2 ให้เลย)
  *   ขั้น 2  แป้นกด PIN ปุ่มกลม กดง่ายด้วยนิ้วโป้งข้างเดียว
  */
+/*
+ * เลขเซสชันรูปแบบ S{เลน}-{ลำดับ 4 หลัก} เช่น S1-0021 — ลูกค้ามักพิมพ์ไม่ใส่ "-"
+ * ใส่ให้อัตโนมัติก่อนตัวเลข 4 หลักสุดท้าย: S10021 → S1-0021, S100021 → S10-0021
+ * คำนวณใหม่ทุกครั้งจากตัวเลขทั้งหมด → พิมพ์ต่อ/ลบได้ปกติ ไม่ค้าง "-" ผิดตำแหน่ง
+ */
+export function formatSessionCode(raw) {
+  const v = String(raw || '').toUpperCase().replace(/[^A-Z0-9-]/g, '');
+  const m = v.match(/^S-?(\d+)-?(\d*)$/);
+  if (!m) return v;
+  const digits = m[1] + m[2];
+  return digits.length >= 5 ? `S${digits.slice(0, -4)}-${digits.slice(-4)}` : v;
+}
+
 export default function Lookup() {
   const { t } = useApp();
   const navigate = useNavigate();
@@ -93,7 +106,7 @@ export default function Lookup() {
     width: '100%', minHeight: '58px', padding: '0 18px',
     borderRadius: '14px', border: '1px solid var(--border)',
     background: 'var(--surface)', color: 'var(--text)',
-    fontFamily: "'IBM Plex Mono', monospace",
+    fontFamily: "'IBM Plex Mono', 'IBM Plex Sans Thai', monospace",
     fontSize: '18px',          // ≥16px กัน iOS ซูมอัตโนมัติตอนโฟกัส
     letterSpacing: '1px', boxSizing: 'border-box',
   };
@@ -157,7 +170,7 @@ export default function Lookup() {
                         flex: 1, minHeight: '56px', padding: '0 16px',
                         borderRadius: '13px', border: '1px solid var(--border)',
                         background: 'var(--surface)', color: 'var(--text)',
-                        fontFamily: "'IBM Plex Mono', monospace", fontSize: '17px',
+                        fontFamily: "'IBM Plex Mono', 'IBM Plex Sans Thai', monospace", fontSize: '17px',
                         fontWeight: 600, cursor: 'pointer', textAlign: 'left',
                         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                       }}
@@ -191,7 +204,7 @@ export default function Lookup() {
               </span>
               <input
                 value={code}
-                onChange={(e) => setCode(e.target.value.toUpperCase())}
+                onChange={(e) => setCode(formatSessionCode(e.target.value))}
                 placeholder="S1-0021"
                 autoCapitalize="characters"
                 autoCorrect="off"
@@ -235,7 +248,7 @@ export default function Lookup() {
         </h1>
         <p style={{ margin: '0 0 22px', fontSize: '14.5px', color: 'var(--muted)' }}>
           {t.sessionCode}{' '}
-          <b style={{ fontFamily: "'IBM Plex Mono', monospace", color: 'var(--text)' }}>{code}</b>
+          <b style={{ fontFamily: "'IBM Plex Mono', 'IBM Plex Sans Thai', monospace", color: 'var(--text)' }}>{code}</b>
         </p>
 
         {/* ช่องแสดงตัวเลขที่กด */}
@@ -255,7 +268,7 @@ export default function Lookup() {
                   borderRadius: '14px',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   fontSize: 'clamp(24px, 7vw, 28px)', fontWeight: 600,
-                  fontFamily: "'IBM Plex Mono', monospace",
+                  fontFamily: "'IBM Plex Mono', 'IBM Plex Sans Thai', monospace",
                   background: 'var(--surface2)',
                   color: 'var(--text)',
                   border: `2px solid ${active ? 'var(--accent)' : 'transparent'}`,

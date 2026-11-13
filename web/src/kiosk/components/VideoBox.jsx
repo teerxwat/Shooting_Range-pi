@@ -1,8 +1,9 @@
 import { useApp } from '@/shared/AppContext';
 import { streamUrl } from '@/kiosk/api';
 import aimSilhouette from '@/shared/assets/aim-silhouette.png';
+import { useMedia } from '@/shared/hooks/useMedia';
 
-const mono = { fontFamily: "'IBM Plex Mono', monospace" };
+const mono = { fontFamily: "'IBM Plex Mono', 'IBM Plex Sans Thai', monospace" };
 
 function Overlay({ children, bg = 'rgba(24,24,26,.62)' }) {
   return (
@@ -42,13 +43,13 @@ function BigSpinner() {
 }
 
 // รูปคนยืนเล็งปืน (silhouette ขาว พื้นโปร่งใส) ประกอบ popup "เตรียมท่ายิง"
-function AimFigure() {
+function AimFigure({ size = 'clamp(100px, 14vw, 170px)' }) {
   return (
     <img
       src={aimSilhouette}
       alt=""
       style={{
-        height: 'clamp(100px, 14vw, 170px)',
+        height: size,
         width: 'auto',
         display: 'block',
         filter: 'drop-shadow(0 2px 8px rgba(0,0,0,.35))'
@@ -68,6 +69,9 @@ const subText = { fontSize: 'clamp(18px, 2.4vw, 28px)', color: 'rgba(255,255,255
 // (DOWNLOADING/DONE ไม่มี overlay — วิดีโอบันทึก/แปลงเบื้องหลัง แสดงเป็นแถบเล็กใน LiveView)
 export default function VideoBox({ laneId, state, session, preview = false, fill = false }) {
   const { t } = useApp();
+  // popup "เตรียมท่ายิง!": จอแคบ → รูปบน ข้อความล่าง · จอเตี้ย (แนวนอน) → ย่อเล็กอยู่ใต้แถบบน ไม่บังปุ่มล่าง
+  const narrow = useMedia('(max-width: 600px)');
+  const short = useMedia('(max-height: 500px)');
   const idleish = ['IDLE', 'DONE', 'ERROR'].includes(state);
   const showStream = state === 'DETECTING' || (preview && idleish);
 
@@ -135,24 +139,27 @@ export default function VideoBox({ laneId, state, session, preview = false, fill
         <div
           style={{
             position: 'absolute',
-            top: fill ? '13%' : '7%',
+            top: fill ? (short ? 'calc(64px + env(safe-area-inset-top))' : '13%') : '7%',
             left: '50%',
             transform: 'translateX(-50%)',
             background: 'rgba(20,20,20,.8)',
-            borderRadius: '26px',
-            padding: 'clamp(16px, 2.5vw, 30px) clamp(24px, 4vw, 48px)',
+            borderRadius: short ? '18px' : '26px',
+            padding: short ? '10px 20px' : 'clamp(16px, 2.5vw, 30px) clamp(20px, 4vw, 48px)',
             display: 'flex',
+            flexDirection: narrow && !short ? 'column' : 'row',
             alignItems: 'center',
-            gap: 'clamp(16px, 2.5vw, 30px)',
+            gap: short ? '14px' : 'clamp(12px, 2.5vw, 30px)',
             color: '#fff',
-            maxWidth: '94%',
+            width: 'max-content',
+            maxWidth: '92%',
+            boxSizing: 'border-box',
             boxShadow: '0 12px 40px rgba(0,0,0,.4)'
           }}
         >
-          <AimFigure />
-          <div style={{ textAlign: 'left' }}>
-            <div style={bigTitle}>{t.getReady}</div>
-            <div style={subText}>{t.detectHint}</div>
+          <AimFigure size={short ? '64px' : narrow ? '90px' : undefined} />
+          <div style={{ textAlign: narrow && !short ? 'center' : 'left' }}>
+            <div style={short ? { ...bigTitle, fontSize: '26px' } : bigTitle}>{t.getReady}</div>
+            <div style={short ? { ...subText, fontSize: '15px' } : subText}>{t.detectHint}</div>
           </div>
         </div>
       )}

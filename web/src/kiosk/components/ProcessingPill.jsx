@@ -1,6 +1,6 @@
 import { useApp } from '@/shared/AppContext';
 
-const mono = { fontFamily: "'IBM Plex Mono', monospace" };
+const mono = { fontFamily: "'IBM Plex Mono', 'IBM Plex Sans Thai', monospace" };
 
 /*
  * แถบโหลดเล็กๆ แทนหน้าจอโหลดเต็มจอ

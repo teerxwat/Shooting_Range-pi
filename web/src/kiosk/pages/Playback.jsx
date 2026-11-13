@@ -8,6 +8,7 @@ import Main from '@/shared/components/Main';
 import SessionChip from '@/shared/components/SessionChip';
 import PlayerControls from '@/shared/components/PlayerControls';
 import { BackButton } from '@/shared/components/buttons';
+import { useMedia } from '@/shared/hooks/useMedia';
 
 /*
  * หน้านี้ดูรีเพลย์อย่างเดียว — ไม่มีการซื้อ/ดาวน์โหลดที่เลนแล้ว
@@ -35,6 +36,8 @@ export default function Playback() {
   const [dur, setDur] = useState(0);
   const [rate, setRate] = useState(0.25);          // คลิป ~200fps → เริ่มที่ slow-mo 0.25x
   const [filter, setFilter] = useState('original'); // original | cinema | mono
+  // จอแคบ: แถวความเร็ว/ฟิลเตอร์แยกบรรทัด ปุ่มกว้างเท่ากันเต็มแถว (ไม่ตกขอบ)
+  const narrow = useMedia('(max-width: 640px)');
 
   const { data: clips } = usePoll(() => getClips(laneId), 5000, [laneId]);
   useOccupy(laneId);
@@ -72,7 +75,9 @@ export default function Playback() {
 
   const segBtn = (on) => ({
     minHeight: '40px',
-    padding: '0 16px',
+    padding: narrow ? '0 6px' : '0 16px',
+    flex: narrow ? '1 1 0' : '0 0 auto',
+    whiteSpace: 'nowrap',
     borderRadius: '7px',
     border: 'none',
     cursor: 'pointer',
@@ -85,6 +90,8 @@ export default function Playback() {
 
   const segWrap = {
     display: 'flex',
+    flex: narrow ? '1 1 auto' : '0 0 auto',
+    minWidth: 0,
     gap: '6px',
     background: 'var(--surface2)',
     border: '1px solid var(--border)',
@@ -108,9 +115,10 @@ export default function Playback() {
           onClick={togglePlay}
           style={{
             position: 'relative',
-            width: '100%',
+            // คงสัดส่วน 16:9 เสมอ — จำกัดความกว้างจากความสูงจอ (เดิม maxHeight ทำให้กล่องเตี้ยผิดสัดส่วนบนแนวนอน)
+            width: 'min(100%, calc(66dvh * 16 / 9))',
+            margin: '0 auto',
             aspectRatio: '16/9',
-            maxHeight: '66vh',
             borderRadius: '16px',
             overflow: 'hidden',
             border: '1px solid var(--border)',
@@ -188,9 +196,9 @@ export default function Playback() {
         <PlayerControls playing={playing} tpos={tpos} dur={dur} onTogglePlay={togglePlay} onSeek={seek} />
 
         {/* ความเร็ว + ฟิลเตอร์ */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '22px', marginTop: '14px', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', flexDirection: narrow ? 'column' : 'row', alignItems: narrow ? 'stretch' : 'center', gap: narrow ? '10px' : '22px', marginTop: '14px', flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <span style={{ fontSize: '15px', color: 'var(--muted)', fontWeight: 600 }}>🐢 {t.speed}</span>
+            <span style={{ fontSize: '15px', color: 'var(--muted)', fontWeight: 600, flex: narrow ? '0 0 auto' : undefined }}>🐢 {t.speed}</span>
             <div style={segWrap}>
               {[0.1, 0.25, 0.5, 1].map((r) => (
                 <button key={r} onClick={() => setSpeed(r)} style={segBtn(rate === r)}>
@@ -201,7 +209,7 @@ export default function Playback() {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <span style={{ fontSize: '15px', color: 'var(--muted)', fontWeight: 600 }}>🎨 {t.filterLabel}</span>
+            <span style={{ fontSize: '15px', color: 'var(--muted)', fontWeight: 600, flex: narrow ? '0 0 auto' : undefined }}>🎨 {t.filterLabel}</span>
             <div style={segWrap}>
               {[
                 ['original', t.fOriginal],
@@ -220,7 +228,7 @@ export default function Playback() {
           <div style={{ fontSize: '15px', color: 'var(--muted)' }}>
             📱 {t.buyOnPhone}
           </div>
-          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: '13px', color: 'var(--muted)' }}>
+          <div style={{ fontFamily: "'IBM Plex Mono', 'IBM Plex Sans Thai', monospace", fontSize: '13px', color: 'var(--muted)' }}>
             {clip.name}
           </div>
         </div>

@@ -33,7 +33,7 @@ export default function PlayerControls({ playing, tpos, dur, onTogglePlay, onSee
       >
         {playing ? '❚❚' : '▶'}
       </button>
-      <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: '14px', color: 'var(--muted)', flex: 'none' }}>
+      <div style={{ fontFamily: "'IBM Plex Mono', 'IBM Plex Sans Thai', monospace", fontSize: '14px', color: 'var(--muted)', flex: 'none' }}>
         {fmt(tpos)}
       </div>
       <input
@@ -45,7 +45,7 @@ export default function PlayerControls({ playing, tpos, dur, onTogglePlay, onSee
         onChange={(e) => onSeek(parseFloat(e.target.value))}
         style={{ flex: 1, height: '34px', cursor: 'pointer' }}
       />
-      <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: '14px', color: 'var(--muted)', flex: 'none' }}>
+      <div style={{ fontFamily: "'IBM Plex Mono', 'IBM Plex Sans Thai', monospace", fontSize: '14px', color: 'var(--muted)', flex: 'none' }}>
         {fmt(dur)}
       </div>
     </div>
