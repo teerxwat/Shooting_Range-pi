@@ -27,7 +27,7 @@ LANE_ID = os.getenv("LANE_ID", "1").strip() or "1"
 # ----- global settings -----
 PORT = int(os.getenv("PORT", "8080"))
 PRESET_ID = int(os.getenv("PRESET_ID", "262144"))
-RECORD_SECONDS = int(os.getenv("RECORD_SECONDS", "10"))
+RECORD_SECONDS = int(os.getenv("RECORD_SECONDS", "15"))
 
 
 def _as_opt_int(value):
