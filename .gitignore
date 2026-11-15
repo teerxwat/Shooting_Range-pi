@@ -14,6 +14,7 @@ node_modules/
 
 # Secrets — NEVER commit these
 .env
+.env.bak*
 *.pem
 *.key
 *.log
